@@ -24,11 +24,45 @@ const QUESTIONS_SATISFACTION = [
 
 const PEUT_GERER_SESSIONS = () => ['admin', 'gestionnaire', 'super_admin'].includes(S.vision);
 
+// Statuts existants sur sessions_formation, dans l'ordre d'affichage du filtre.
+const STATUTS_SESSION = ['planifiee', 'confirmee', 'en_cours', 'terminee', 'annulee'];
+
+// Toutes les sessions chargées une fois par passage sur l'écran, puis
+// filtrées côté client (recherche texte + statut + période) pour une
+// recherche instantanée sans aller-retour serveur à chaque frappe.
+window.__sessionsToutes = [];
+
 async function ecranSessions(vue) {
   vue.innerHTML = `
     <div class="carte" style="display:flex;justify-content:space-between;align-items:center;">
       <h2 style="margin:0;">Sessions</h2>
       ${PEUT_GERER_SESSIONS() ? '<button class="bouton" onclick="ecranNouvelleSession($(\'#vue\'))">+ Nouvelle session</button>' : ''}
+    </div>
+    <div class="carte">
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+        <div style="flex:2;min-width:200px;">
+          <label for="filtre-texte">Rechercher</label>
+          <input id="filtre-texte" placeholder="Client, formation, lieu…" oninput="filtrerEtAfficherSessions()">
+        </div>
+        <div style="flex:1;min-width:150px;">
+          <label for="filtre-statut">Statut</label>
+          <select id="filtre-statut" onchange="filtrerEtAfficherSessions()">
+            <option value="">Tous</option>
+            ${STATUTS_SESSION.map(s => `<option value="${s}">${esc(s)}</option>`).join('')}
+          </select>
+        </div>
+        <div style="flex:1;min-width:140px;">
+          <label for="filtre-date-debut">Du</label>
+          <input id="filtre-date-debut" type="date" onchange="filtrerEtAfficherSessions()">
+        </div>
+        <div style="flex:1;min-width:140px;">
+          <label for="filtre-date-fin">Au</label>
+          <input id="filtre-date-fin" type="date" onchange="filtrerEtAfficherSessions()">
+        </div>
+        <div>
+          <button class="bouton" style="background:#eee;color:#333;" onclick="reinitialiserFiltresSessions()">Réinitialiser</button>
+        </div>
+      </div>
     </div>
     <div class="carte"><div id="liste-sessions">Chargement…</div></div>`;
 
@@ -36,11 +70,47 @@ async function ecranSessions(vue) {
     .from('sessions_formation')
     .select('id, date_debut, date_fin, lieu, statut, formations_catalogue(denomination), clients(raison_sociale)')
     .order('date_debut', { ascending: false })
-    .limit(100);
+    .limit(300);
 
   const zone = $('#liste-sessions');
   if (error) { DEBUG.erreur('ecranSessions', error); zone.textContent = 'Erreur de chargement.'; return; }
-  if (!data || data.length === 0) { zone.innerHTML = '<p style="color:#55636c;">Aucune session.</p>'; return; }
+  window.__sessionsToutes = data || [];
+  filtrerEtAfficherSessions();
+}
+
+function reinitialiserFiltresSessions() {
+  $('#filtre-texte').value = '';
+  $('#filtre-statut').value = '';
+  $('#filtre-date-debut').value = '';
+  $('#filtre-date-fin').value = '';
+  filtrerEtAfficherSessions();
+}
+
+function filtrerEtAfficherSessions() {
+  const zone = $('#liste-sessions');
+  if (!zone) return;
+
+  const texte = ($('#filtre-texte')?.value || '').trim().toLowerCase();
+  const statut = $('#filtre-statut')?.value || '';
+  const dateDebut = $('#filtre-date-debut')?.value || '';
+  const dateFin = $('#filtre-date-fin')?.value || '';
+
+  const data = (window.__sessionsToutes || []).filter(s => {
+    if (statut && s.statut !== statut) return false;
+    if (dateDebut && s.date_debut < dateDebut) return false;
+    if (dateFin && s.date_debut > dateFin) return false;
+    if (texte) {
+      const cible = [
+        s.clients?.raison_sociale || '',
+        s.formations_catalogue?.denomination || '',
+        s.lieu || '',
+      ].join(' ').toLowerCase();
+      if (!cible.includes(texte)) return false;
+    }
+    return true;
+  });
+
+  if (data.length === 0) { zone.innerHTML = '<p style="color:#55636c;">Aucune session ne correspond à ces critères.</p>'; return; }
 
   zone.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:14px;">
     <thead><tr style="text-align:left;color:#55636c;font-size:12px;">
@@ -99,12 +169,22 @@ async function ecranNouvelleSession(vue) {
           <label for="ns-date-fin">Date de fin</label>
           <input id="ns-date-fin" type="date">
         </div>
+        <div style="flex:1;">
+          <label for="ns-prix">Tarif (€)</label>
+          <input id="ns-prix" type="number" step="0.01" placeholder="pré-rempli depuis le catalogue">
+        </div>
       </div>
+      <p style="font-size:12px;color:#55636c;margin:2px 0 0;">Le tarif est pré-rempli depuis le catalogue mais modifiable pour cette session uniquement — il ne change pas le prix catalogue.</p>
 
       <button class="bouton" id="ns-valider" style="margin-top:16px;">Créer la session</button>
       <button class="bouton" style="margin-top:16px;margin-left:8px;background:#eee;color:#333;" onclick="allerA('sessions')">Annuler</button>
       <div class="erreur" id="ns-erreur"></div>
     </div>`;
+
+  $('#ns-formation').onchange = (e) => {
+    const f = (formations || []).find(x => x.id === e.target.value);
+    if (f && f.prix != null && !$('#ns-prix').value) $('#ns-prix').value = f.prix;
+  };
 
   $('#ns-valider').onclick = async () => {
     const clientInput = $('#ns-client').value.trim();
@@ -113,6 +193,7 @@ async function ecranNouvelleSession(vue) {
     const dateDebut = $('#ns-date-debut').value;
     const dateFin = $('#ns-date-fin').value || dateDebut;
     const lieu = $('#ns-lieu').value.trim();
+    const prix = $('#ns-prix').value ? Number($('#ns-prix').value) : null;
 
     if (!formationId || !dateDebut) { $('#ns-erreur').textContent = 'Formation et date de début obligatoires.'; return; }
 
@@ -123,6 +204,7 @@ async function ecranNouvelleSession(vue) {
       lieu: lieu || null,
       date_debut: dateDebut,
       date_fin: dateFin,
+      prix_unitaire: prix,
       formateur_id: S.profil.role === 'formateur' ? S.profil.id : null,
     }).select().single();
 
@@ -166,8 +248,24 @@ async function ouvrirSession(id) {
           — statut : ${esc(session.statut)}
         </p>
       </div>
-      <button class="bouton" style="background:#eee;color:#333;" onclick="allerA('sessions')">← Retour</button>
+      <div style="text-align:right;">
+        <button class="bouton" style="background:#eee;color:#333;" onclick="allerA('sessions')">← Retour</button>
+        ${PEUT_GERER_SESSIONS() && session.statut !== 'terminee' ? `
+        <button class="bouton" style="background:#fdeeee;color:#b3261e;margin-left:8px;" onclick="ouvrirConfirmationSuppression('${session.id}')">Supprimer</button>` : ''}
+      </div>
     </div>
+
+    <div id="suppression-zone"></div>
+
+    ${PEUT_GERER_SESSIONS() ? `
+    <div class="carte">
+      <h3 style="margin-top:0;">Tarif</h3>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <input id="sess-prix" type="number" step="0.01" value="${session.prix_unitaire != null ? session.prix_unitaire : ''}" style="max-width:160px;">
+        <span style="font-size:13px;color:#55636c;">€ — propre à cette session, ne modifie pas le tarif du catalogue</span>
+        <button class="bouton" style="padding:6px 14px;font-size:13px;" onclick="enregistrerPrixSession('${session.id}')">Enregistrer</button>
+      </div>
+    </div>` : ''}
 
     <div class="carte">
       <h3 style="margin-top:0;">Documents de la session</h3>
@@ -196,6 +294,40 @@ async function ouvrirSession(id) {
       timer = setTimeout(() => rechercherStagiaires(e.target.value.trim(), session), 250);
     };
   }
+}
+
+async function enregistrerPrixSession(sessionId) {
+  const valeur = $('#sess-prix').value;
+  const { error } = await supa.from('sessions_formation').update({ prix_unitaire: valeur ? Number(valeur) : null }).eq('id', sessionId);
+  if (error) { DEBUG.erreur('enregistrerPrixSession', error); toast('Erreur : ' + error.message, 'erreur'); return; }
+  toast('Tarif mis à jour.');
+  if (window.__sessionCourante) window.__sessionCourante.prix_unitaire = valeur ? Number(valeur) : null;
+}
+
+function ouvrirConfirmationSuppression(sessionId) {
+  const zone = $('#suppression-zone');
+  zone.innerHTML = `
+    <div class="carte" style="border-color:#b3261e;background:#fdeeee;">
+      <h3 style="margin-top:0;color:#b3261e;">Supprimer cette session</h3>
+      <p style="font-size:13px;">Cette action supprime définitivement la session, ses inscriptions et les documents associés enregistrés. Elle ne concerne qu'une session non clôturée (statut différent de "terminée").</p>
+      <label for="supp-texte">Pour confirmer, tape <strong>SUPPRESSION</strong> en toutes lettres ci-dessous :</label>
+      <input id="supp-texte" placeholder="SUPPRESSION">
+      <button class="bouton" id="supp-valider" style="margin-top:10px;background:#b3261e;" disabled>Confirmer la suppression</button>
+      <button class="bouton" style="margin-top:10px;margin-left:8px;background:#eee;color:#333;" onclick="$('#suppression-zone').innerHTML=''">Annuler</button>
+      <div class="erreur" id="supp-erreur"></div>
+    </div>`;
+
+  const champ = $('#supp-texte');
+  const bouton = $('#supp-valider');
+  champ.oninput = () => { bouton.disabled = champ.value.trim() !== 'SUPPRESSION'; };
+
+  bouton.onclick = async () => {
+    if (champ.value.trim() !== 'SUPPRESSION') return;
+    const { error } = await supa.from('sessions_formation').delete().eq('id', sessionId);
+    if (error) { DEBUG.erreur('supprimerSession', error); $('#supp-erreur').textContent = 'Erreur : ' + error.message; return; }
+    toast('Session supprimée.');
+    allerA('sessions');
+  };
 }
 
 function rendreParticipants(session, participants) {

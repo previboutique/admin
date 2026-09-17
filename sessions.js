@@ -152,7 +152,7 @@ async function ouvrirSession(id) {
 
   const { data: participants } = await supa
     .from('session_participants')
-    .select('*, stagiaires(nom, prenom, date_naissance)')
+    .select('*, stagiaires(civilite, nom, prenom, date_naissance)')
     .eq('session_id', id);
 
   vue.innerHTML = `
@@ -167,6 +167,13 @@ async function ouvrirSession(id) {
         </p>
       </div>
       <button class="bouton" style="background:#eee;color:#333;" onclick="allerA('sessions')">← Retour</button>
+    </div>
+
+    <div class="carte">
+      <h3 style="margin-top:0;">Documents de la session</h3>
+      <button class="bouton" onclick="genererConvention(window.__sessionCourante, window.__participantsCourants)">Convention</button>
+      <button class="bouton" style="margin-left:8px;" onclick="genererFeuillePresence(window.__sessionCourante, window.__participantsCourants)">Feuille d'émargement</button>
+      <p style="font-size:12px;color:#55636c;margin:8px 0 0;">La feuille d'émargement n'a pas de modèle papier de référence confirmé — mise en page à ajuster si besoin.</p>
     </div>
 
     <div class="carte">
@@ -204,6 +211,9 @@ function rendreParticipants(session, participants) {
         </select>
         <button class="bouton" style="padding:5px 10px;font-size:12px;" onclick="toggleFise('${p.id}')">FISE / compétences</button>
         <button class="bouton" style="padding:5px 10px;font-size:12px;" onclick="toggleEvaluation('${p.id}')">Évaluation stagiaire</button>
+        <button class="bouton" style="padding:5px 10px;font-size:12px;background:#eee;color:#333;" onclick="genererConvocation(window.__sessionCourante, window.__participantsCourants.find(x=>x.id==='${p.id}'))">Convocation</button>
+        <button class="bouton" style="padding:5px 10px;font-size:12px;background:#eee;color:#333;" onclick="genererAFF(window.__sessionCourante, window.__participantsCourants.find(x=>x.id==='${p.id}'))">AFF</button>
+        <button class="bouton" style="padding:5px 10px;font-size:12px;background:#eee;color:#333;" onclick="genererCertificatRealisation(window.__sessionCourante, window.__participantsCourants.find(x=>x.id==='${p.id}'))">Certificat</button>
       </div>
       <div id="fise-${p.id}" style="display:none;margin-top:12px;"></div>
       <div id="eval-${p.id}" style="display:none;margin-top:12px;"></div>

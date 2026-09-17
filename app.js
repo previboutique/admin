@@ -17,8 +17,8 @@ window.ROLES_ONGLETS = {
 window.DISPATCH_ONGLETS = {
   accueil: ecranAccueil,        // dashboard.js
   sessions: ecranSessions,      // sessions.js
+  catalogue: ecranCatalogue,    // catalogue.js
   // clients: ecranClients,        // à venir
   // stagiaires: ecranStagiaires,  // à venir
-  // catalogue: ecranCatalogue,    // à venir
   // organisations: ecranOrganisations, // à venir (super_admin)
 };

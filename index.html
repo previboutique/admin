@@ -59,9 +59,13 @@
   réservés. Copie, reproduction ou réutilisation interdites sans autorisation.
 </footer>
 
-<!-- Fichiers applicatifs, dans l'ordre de dépendance -->
+<!-- Fichiers applicatifs, dans l'ordre de dépendance : debug/core d'abord (socle),
+     puis les écrans par domaine, puis app.js qui les assemble en dernier
+     (il référence leurs fonctions dans DISPATCH_ONGLETS). -->
 <script src="debug.js"></script>
 <script src="core.js"></script>
+<script src="dashboard.js"></script>
+<script src="sessions.js"></script>
 <script src="app.js"></script>
 
 <script>

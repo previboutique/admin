@@ -24,6 +24,46 @@ const QUESTIONS_SATISFACTION = [
 
 const PEUT_GERER_SESSIONS = () => ['admin', 'gestionnaire', 'super_admin'].includes(S.vision);
 
+// Origines de financement d'une session, alignées sur le cadre C du Bilan
+// Pédagogique et Financier (BPF) — permet de répartir automatiquement les
+// produits de l'organisme par origine lors du calcul du BPF (voir bpf.js).
+const ORIGINES_FINANCEMENT = [
+  { groupe: 'Entreprise / particulier', options: [
+    { valeur: 'entreprise', libelle: 'Entreprise (salariés)' },
+    { valeur: 'particulier', libelle: 'Particulier (à ses frais)' },
+  ]},
+  { groupe: 'Organismes gestionnaires des fonds de la formation (OPCO...)', options: [
+    { valeur: 'apprentissage', libelle: 'Contrat d\'apprentissage' },
+    { valeur: 'professionnalisation', libelle: 'Contrat de professionnalisation' },
+    { valeur: 'alternance_pro', libelle: 'Promotion ou reconversion par alternance' },
+    { valeur: 'transition_pro', libelle: 'Projet de transition professionnelle' },
+    { valeur: 'cpf', libelle: 'Compte personnel de formation (CPF)' },
+    { valeur: 'recherche_emploi', libelle: 'Dispositif personnes en recherche d\'emploi' },
+    { valeur: 'tns', libelle: 'Dispositif travailleurs non-salariés' },
+    { valeur: 'plan_competences', libelle: 'Plan de développement des compétences / autre dispositif' },
+  ]},
+  { groupe: 'Pouvoirs publics', options: [
+    { valeur: 'agents_publics', libelle: 'Formation d\'agents publics' },
+    { valeur: 'instances_europeennes', libelle: 'Instances européennes' },
+    { valeur: 'etat', libelle: 'État' },
+    { valeur: 'collectivites', libelle: 'Conseil régional / collectivité' },
+    { valeur: 'france_travail', libelle: 'France Travail (ex Pôle emploi)' },
+    { valeur: 'autres_publics', libelle: 'Autres ressources publiques' },
+  ]},
+  { groupe: 'Autre', options: [
+    { valeur: 'autre_organisme', libelle: 'Autre organisme de formation (y compris CFA)' },
+    { valeur: 'autres_produits', libelle: 'Autres produits de formation professionnelle' },
+  ]},
+];
+
+function libelleOrigineFinancement(valeur) {
+  for (const g of ORIGINES_FINANCEMENT) {
+    const o = g.options.find(o => o.valeur === valeur);
+    if (o) return o.libelle;
+  }
+  return valeur;
+}
+
 // Statuts existants sur sessions_formation, dans l'ordre d'affichage du filtre.
 const STATUTS_SESSION = ['planifiee', 'confirmee', 'en_cours', 'terminee', 'annulee'];
 
@@ -176,6 +216,19 @@ async function ecranNouvelleSession(vue) {
       </div>
       <p style="font-size:12px;color:#55636c;margin:2px 0 0;">Le tarif est pré-rempli depuis le catalogue mais modifiable pour cette session uniquement — il ne change pas le prix catalogue.</p>
 
+      <label for="ns-origine">Origine du financement</label>
+      <select id="ns-origine">
+        ${ORIGINES_FINANCEMENT.map(g => `
+          <optgroup label="${esc(g.groupe)}">
+            ${g.options.map(o => `<option value="${o.valeur}" ${o.valeur === 'entreprise' ? 'selected' : ''}>${esc(o.libelle)}</option>`).join('')}
+          </optgroup>`).join('')}
+      </select>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin-top:8px;">
+        <input type="checkbox" id="ns-sous-traitance" style="width:auto;">
+        Session confiée par un autre organisme de formation (sous-traitance reçue)
+      </label>
+      <p style="font-size:12px;color:#55636c;margin:2px 0 0;">Sert au calcul automatique du Bilan Pédagogique et Financier (BPF) annuel.</p>
+
       <button class="bouton" id="ns-valider" style="margin-top:16px;">Créer la session</button>
       <button class="bouton" style="margin-top:16px;margin-left:8px;background:#eee;color:#333;" onclick="allerA('sessions')">Annuler</button>
       <div class="erreur" id="ns-erreur"></div>
@@ -194,6 +247,8 @@ async function ecranNouvelleSession(vue) {
     const dateFin = $('#ns-date-fin').value || dateDebut;
     const lieu = $('#ns-lieu').value.trim();
     const prix = $('#ns-prix').value ? Number($('#ns-prix').value) : null;
+    const origineFinancement = $('#ns-origine').value;
+    const sousTraitanceRecue = $('#ns-sous-traitance').checked;
 
     if (!formationId || !dateDebut) { $('#ns-erreur').textContent = 'Formation et date de début obligatoires.'; return; }
 
@@ -205,6 +260,8 @@ async function ecranNouvelleSession(vue) {
       date_debut: dateDebut,
       date_fin: dateFin,
       prix_unitaire: prix,
+      origine_financement: origineFinancement,
+      sous_traitance_recue: sousTraitanceRecue,
       formateur_id: S.profil.role === 'formateur' ? S.profil.id : null,
     }).select().single();
 
@@ -265,6 +322,23 @@ async function ouvrirSession(id) {
         <span style="font-size:13px;color:#55636c;">€ — propre à cette session, ne modifie pas le tarif du catalogue</span>
         <button class="bouton" style="padding:6px 14px;font-size:13px;" onclick="enregistrerPrixSession('${session.id}')">Enregistrer</button>
       </div>
+    </div>
+
+    <div class="carte">
+      <h3 style="margin-top:0;">Financement</h3>
+      <label for="sess-origine">Origine du financement</label>
+      <select id="sess-origine" style="max-width:420px;">
+        ${ORIGINES_FINANCEMENT.map(g => `
+          <optgroup label="${esc(g.groupe)}">
+            ${g.options.map(o => `<option value="${o.valeur}" ${o.valeur === session.origine_financement ? 'selected' : ''}>${esc(o.libelle)}</option>`).join('')}
+          </optgroup>`).join('')}
+      </select>
+      <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin-top:8px;">
+        <input type="checkbox" id="sess-sous-traitance" style="width:auto;" ${session.sous_traitance_recue ? 'checked' : ''}>
+        Session confiée par un autre organisme de formation (sous-traitance reçue)
+      </label>
+      <button class="bouton" style="padding:6px 14px;font-size:13px;margin-top:10px;" onclick="enregistrerFinancementSession('${session.id}')">Enregistrer</button>
+      <p style="font-size:12px;color:#55636c;margin:8px 0 0;">Sert au calcul automatique du Bilan Pédagogique et Financier (BPF) annuel.</p>
     </div>` : ''}
 
     <div class="carte">
@@ -272,6 +346,12 @@ async function ouvrirSession(id) {
       <button class="bouton" onclick="genererConvention(window.__sessionCourante, window.__participantsCourants)">Convention</button>
       <button class="bouton" style="margin-left:8px;" onclick="genererFeuillePresence(window.__sessionCourante, window.__participantsCourants)">Feuille d'émargement</button>
       <p style="font-size:12px;color:#55636c;margin:8px 0 0;">La feuille d'émargement n'a pas de modèle papier de référence confirmé — mise en page à ajuster si besoin.</p>
+    </div>
+
+    <div class="carte">
+      <h3 style="margin-top:0;">Téléchargement groupé et envoi au client</h3>
+      <p style="font-size:12px;color:#55636c;margin:0 0 8px;">Sélectionne les documents à télécharger en une fois (ZIP) ou à envoyer par email au client.</p>
+      <div id="selection-documents">Chargement…</div>
     </div>
 
     <div class="carte">
@@ -286,6 +366,7 @@ async function ouvrirSession(id) {
     </div>`;
 
   rendreParticipants(session, participants || []);
+  rendreSelectionDocuments(session, participants || []);
 
   if (PEUT_GERER_SESSIONS()) {
     let timer;
@@ -302,6 +383,18 @@ async function enregistrerPrixSession(sessionId) {
   if (error) { DEBUG.erreur('enregistrerPrixSession', error); toast('Erreur : ' + error.message, 'erreur'); return; }
   toast('Tarif mis à jour.');
   if (window.__sessionCourante) window.__sessionCourante.prix_unitaire = valeur ? Number(valeur) : null;
+}
+
+async function enregistrerFinancementSession(sessionId) {
+  const origine = $('#sess-origine').value;
+  const sousTraitance = $('#sess-sous-traitance').checked;
+  const { error } = await supa.from('sessions_formation').update({ origine_financement: origine, sous_traitance_recue: sousTraitance }).eq('id', sessionId);
+  if (error) { DEBUG.erreur('enregistrerFinancementSession', error); toast('Erreur : ' + error.message, 'erreur'); return; }
+  toast('Financement mis à jour.');
+  if (window.__sessionCourante) {
+    window.__sessionCourante.origine_financement = origine;
+    window.__sessionCourante.sous_traitance_recue = sousTraitance;
+  }
 }
 
 function ouvrirConfirmationSuppression(sessionId) {

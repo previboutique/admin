@@ -6,7 +6,7 @@
 // Onglets visibles par rôle. À enrichir au fil des écrans livrés.
 window.ROLES_ONGLETS = {
   super_admin: [['accueil', 'Accueil'], ['organisations', 'Organisations']],
-  admin: [['accueil', 'Accueil'], ['clients', 'Clients'], ['stagiaires', 'Stagiaires'], ['catalogue', 'Catalogue'], ['sessions', 'Sessions'], ['import', 'Import']],
+  admin: [['accueil', 'Accueil'], ['clients', 'Clients'], ['stagiaires', 'Stagiaires'], ['catalogue', 'Catalogue'], ['sessions', 'Sessions'], ['bpf', 'BPF'], ['import', 'Import']],
   gestionnaire: [['accueil', 'Accueil'], ['clients', 'Clients'], ['stagiaires', 'Stagiaires'], ['sessions', 'Sessions']],
   // Un formateur n'a accès qu'à ses propres sessions (agenda, FISE,
   // évaluations des stagiaires) — la RLS sur sessions_formation /
@@ -20,6 +20,7 @@ window.DISPATCH_ONGLETS = {
   catalogue: ecranCatalogue,    // catalogue.js
   import: ecranImport,          // import_excel.js
   clients: ecranClients,        // clients.js
+  bpf: ecranBPF,                 // bpf.js
   // stagiaires: ecranStagiaires,  // à venir
   // organisations: ecranOrganisations, // à venir (super_admin)
 };

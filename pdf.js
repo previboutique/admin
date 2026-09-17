@@ -67,9 +67,14 @@ function paragraphe(doc, texte, y, opts = {}) {
   return y + lignes.length * (opts.interligne || 5) + (opts.apres || 3);
 }
 
-function telechargerOuOuvrir(doc, nomFichier) {
+// sansTelechargement=true : construit le PDF (pied de page inclus) sans le
+// télécharger — utilisé pour le téléchargement groupé (ZIP) et l'envoi par
+// email, où le fichier part vers un ZIP ou vers Supabase Storage plutôt que
+// directement sur le disque de l'utilisateur.
+function telechargerOuOuvrir(doc, nomFichier, sansTelechargement) {
   ajouterPiedDePage(doc);
-  doc.save(nomFichier);
+  if (!sansTelechargement) doc.save(nomFichier);
+  return { doc, nomFichier };
 }
 
 function nomFichierDoc(prefixe, session, stagiaire) {
@@ -82,7 +87,7 @@ function nomFichierDoc(prefixe, session, stagiaire) {
 // ============================================================================
 // CONVOCATION — un document par stagiaire
 // ============================================================================
-function genererConvocation(session, participant) {
+function genererConvocation(session, participant, sansTelechargement) {
   const doc = new jsPDF();
   const f = session.formations_catalogue;
   const st = participant.stagiaires;
@@ -125,13 +130,13 @@ function genererConvocation(session, participant) {
   doc.setFont('helvetica', 'bold');
   doc.text(S.organisation.raison_sociale, 195, y, { align: 'right' });
 
-  telechargerOuOuvrir(doc, nomFichierDoc('Convocation', session, st));
+  return telechargerOuOuvrir(doc, nomFichierDoc('Convocation', session, st), sansTelechargement);
 }
 
 // ============================================================================
 // ATTESTATION DE FIN DE FORMATION (AFF) — un document par stagiaire
 // ============================================================================
-function genererAFF(session, participant) {
+function genererAFF(session, participant, sansTelechargement) {
   const doc = new jsPDF();
   const f = session.formations_catalogue;
   const st = participant.stagiaires;
@@ -195,13 +200,13 @@ function genererAFF(session, participant) {
   doc.setFont('helvetica', 'italic'); doc.setFontSize(8.5); doc.setTextColor(90, 90, 90);
   doc.text('Document à conserver par le/la stagiaire. Aucun duplicata ne sera délivré', 105, y, { align: 'center' });
 
-  telechargerOuOuvrir(doc, nomFichierDoc('AFF', session, st));
+  return telechargerOuOuvrir(doc, nomFichierDoc('AFF', session, st), sansTelechargement);
 }
 
 // ============================================================================
 // CERTIFICAT DE RÉALISATION — un document par stagiaire
 // ============================================================================
-function genererCertificatRealisation(session, participant) {
+function genererCertificatRealisation(session, participant, sansTelechargement) {
   const doc = new jsPDF();
   const f = session.formations_catalogue;
   const st = participant.stagiaires;
@@ -252,7 +257,7 @@ function genererCertificatRealisation(session, participant) {
     "1 Lorsque l'action est mise en œuvre dans le cadre d'un projet de transition professionnelle, le certificat de " +
     'réalisation doit être transmis mensuellement.', y, { taille: 7.5 });
 
-  telechargerOuOuvrir(doc, nomFichierDoc('Certificat de realisation', session, st));
+  return telechargerOuOuvrir(doc, nomFichierDoc('Certificat de realisation', session, st), sansTelechargement);
 }
 
 function client_ville_txt(client) {
@@ -262,7 +267,7 @@ function client_ville_txt(client) {
 // ============================================================================
 // CONVENTION DE FORMATION PROFESSIONNELLE — un document par session
 // ============================================================================
-function genererConvention(session, participants) {
+function genererConvention(session, participants, sansTelechargement) {
   const doc = new jsPDF();
   const f = session.formations_catalogue;
   const client = session.clients;
@@ -361,7 +366,7 @@ function genererConvention(session, participants) {
     });
   }
 
-  telechargerOuOuvrir(doc, nomFichierDoc('Convention', session, null));
+  return telechargerOuOuvrir(doc, nomFichierDoc('Convention', session, null), sansTelechargement);
 }
 
 // ============================================================================
@@ -369,7 +374,7 @@ function genererConvention(session, participants) {
 // ⚠️ Pas d'exemple exploitable dans le classeur (version scannée uniquement) :
 // mise en page originale, à valider/ajuster avec Jérémy.
 // ============================================================================
-function genererFeuillePresence(session, participants) {
+function genererFeuillePresence(session, participants, sansTelechargement) {
   const doc = new jsPDF({ orientation: 'landscape' });
   const f = session.formations_catalogue;
   let y = 18;
@@ -388,5 +393,110 @@ function genererFeuillePresence(session, participants) {
     headStyles: { fillColor: [10, 92, 138] },
   });
 
-  telechargerOuOuvrir(doc, nomFichierDoc('Feuille de presence', session, null));
+  return telechargerOuOuvrir(doc, nomFichierDoc('Feuille de presence', session, null), sansTelechargement);
+}
+
+// ============================================================================
+// RÉCAPITULATIF BPF — aide interne au remplissage du Bilan Pédagogique et
+// Financier officiel (CERFA 10443*17, monactiviteformation.emploi.gouv.fr).
+// Ce n'est pas le formulaire officiel : une mise en forme propre à l'appli,
+// à vérifier avant de reporter les chiffres sur le site du gouvernement.
+// Les données (donnees) sont calculées dans bpf.js.
+// ============================================================================
+function genererDocumentBPF(exercice, donnees) {
+  const doc = new jsPDF();
+  let y = 18;
+
+  y = titre(doc, 'RÉCAPITULATIF — BILAN PÉDAGOGIQUE ET FINANCIER', y);
+  y = sousTitre(doc, `Exercice du ${formatDateLongue(exercice.debut)} au ${formatDateLongue(exercice.fin)} — document d'aide, à reporter sur monactiviteformation.emploi.gouv.fr`, y);
+
+  doc.autoTable({
+    startY: y + 2,
+    theme: 'plain',
+    styles: { fontSize: 10, cellPadding: 1.5 },
+    body: [
+      ['Organisme', S.organisation.raison_sociale || ''],
+      ["N° de déclaration d'activité", S.organisation.numero_declaration_activite || ''],
+      ['SIRET', S.organisation.siret || ''],
+      ['Code NAF', S.organisation.code_naf || ''],
+    ],
+    columnStyles: { 0: { fontStyle: 'bold', cellWidth: 55 } },
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  y = paragraphe(doc, 'C. Produits par origine de financement (hors taxes)', y, { gras: true, apres: 2 });
+  doc.autoTable({
+    startY: y,
+    head: [['Origine', 'Montant']],
+    body: Object.entries(donnees.produitsParOrigine).map(([o, m]) => [libelleOrigineFinancement(o), m.toFixed(2) + ' €']),
+    foot: [['TOTAL', donnees.totalProduits.toFixed(2) + ' €']],
+    styles: { fontSize: 9.5, cellPadding: 2 },
+    headStyles: { fillColor: [10, 92, 138] },
+    footStyles: { fillColor: [230, 230, 230], textColor: [20, 20, 20], fontStyle: 'bold' },
+    columnStyles: { 1: { halign: 'right', cellWidth: 40 } },
+  });
+  y = doc.lastAutoTable.finalY + 6;
+
+  y = paragraphe(doc, 'E. Personnes dispensant des heures de formation', y, { gras: true, apres: 2 });
+  doc.autoTable({
+    startY: y,
+    head: [['', 'Nombre', 'Heures dispensées']],
+    body: [
+      ["De l'organisme", donnees.formateursInternes, donnees.heuresFormateursInternes],
+      ['Extérieures (sous-traitance)', donnees.formateursExternes, donnees.heuresFormateursExternes],
+    ],
+    styles: { fontSize: 9.5, cellPadding: 2 },
+    headStyles: { fillColor: [10, 92, 138] },
+    columnStyles: { 1: { halign: 'right', cellWidth: 30 }, 2: { halign: 'right', cellWidth: 40 } },
+  });
+  y = doc.lastAutoTable.finalY + 6;
+
+  if (y > 230) { doc.addPage(); y = 20; }
+
+  y = paragraphe(doc, 'F. Stagiaires (hors sous-traitance reçue)', y, { gras: true, apres: 2 });
+  doc.autoTable({
+    startY: y,
+    head: [['Type de stagiaire', 'Stagiaires', 'Heures suivies']],
+    body: [
+      ["Salariés d'employeurs privés", donnees.f1.a.nb, donnees.f1.a.heures],
+      ['Apprentis', donnees.f1.b.nb, donnees.f1.b.heures],
+      ["Personnes en recherche d'emploi", donnees.f1.c.nb, donnees.f1.c.heures],
+      ['Particuliers à leurs frais', donnees.f1.d.nb, donnees.f1.d.heures],
+      ['Autres stagiaires', donnees.f1.e.nb, donnees.f1.e.heures],
+    ],
+    foot: [['TOTAL', donnees.totalStagiairesF, donnees.totalHeuresF]],
+    styles: { fontSize: 9.5, cellPadding: 2 },
+    headStyles: { fillColor: [10, 92, 138] },
+    footStyles: { fillColor: [230, 230, 230], textColor: [20, 20, 20], fontStyle: 'bold' },
+    columnStyles: { 1: { halign: 'right', cellWidth: 30 }, 2: { halign: 'right', cellWidth: 40 } },
+  });
+  y = doc.lastAutoTable.finalY + 6;
+
+  const specialites = Object.entries(donnees.specialites).sort((a, b) => b[1].nb - a[1].nb).slice(0, 5);
+  if (specialites.length) {
+    if (y > 250) { doc.addPage(); y = 20; }
+    y = paragraphe(doc, 'Principales spécialités de formation', y, { gras: true, taille: 10, apres: 2 });
+    doc.autoTable({
+      startY: y,
+      head: [['Spécialité', 'Stagiaires', 'Heures']],
+      body: specialites.map(([lib, v]) => [lib, v.nb, v.heures]),
+      styles: { fontSize: 9.5, cellPadding: 2 },
+      headStyles: { fillColor: [10, 92, 138] },
+      columnStyles: { 1: { halign: 'right', cellWidth: 30 }, 2: { halign: 'right', cellWidth: 40 } },
+    });
+    y = doc.lastAutoTable.finalY + 6;
+  }
+
+  if (y > 250) { doc.addPage(); y = 20; }
+  y = paragraphe(doc, 'G. Stagiaires dont la formation a été confiée par un autre organisme', y, { gras: true, apres: 2 });
+  y = paragraphe(doc, `${donnees.stagiairesG} stagiaire(s) — ${donnees.heuresG} heure(s) suivies.`, y, { apres: 8 });
+
+  doc.setFont('helvetica', 'italic'); doc.setFontSize(8); doc.setTextColor(90, 90, 90);
+  y = paragraphe(doc,
+    "Document généré automatiquement à partir des sessions enregistrées dans l'application. Il ne remplace pas la déclaration officielle du Bilan " +
+    "Pédagogique et Financier, à effectuer avant le 30 avril sur monactiviteformation.emploi.gouv.fr. Vérifier notamment le total des charges, la part " +
+    "du chiffre d'affaires réalisée en formation professionnelle, et les catégories approximées (type de stagiaire, spécialités) avant de reporter ces chiffres.",
+    y, { taille: 8 });
+
+  telechargerOuOuvrir(doc, `BPF - ${exercice.debut} au ${exercice.fin} - ${S.organisation.raison_sociale}.pdf`.replace(/[/\\?%*:|"<>]+/g, '').replace(/\s+/g, ' '));
 }

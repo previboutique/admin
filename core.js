@@ -2,12 +2,10 @@
 // core.js — socle : connexion Supabase, authentification, état global S,
 // routage entre onglets.
 
-// ⚠️ À COMPLÉTER : remplacer par l'URL et la clé publique ("anon") de ton
-// projet Supabase (Supabase → Project Settings → API). La clé "anon" est
-// publique par conception : c'est la Row Level Security côté base qui protège
-// les données, pas le secret de cette clé.
-const SUPABASE_URL = 'https://TON-PROJET.supabase.co';
-const SUPABASE_ANON_KEY = 'TA-CLE-ANON-PUBLIQUE';
+// Clé publique par conception : c'est la Row Level Security côté base qui
+// protège les données, pas le secret de cette clé.
+const SUPABASE_URL = 'https://kzahahrnauynnrfznkje.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_VpOYj7KajWRHJKyjPyLh_g_mgabFpgZ';
 
 const supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 

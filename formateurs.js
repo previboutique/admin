@@ -208,6 +208,33 @@ async function chargerStatsFormateur(formateurId) {
     return items;
   };
 
+  // --- Nombre de sessions par année, et par année / par famille de
+  // formation. Les familles gardent la même couleur que la répartition
+  // ci-dessus (mêmes TOP_N + "Autres"), pour rester lisible d'un bloc à
+  // l'autre de la fiche.
+  const TOP_N_FAMILLES = 6;
+  const famillesTop = parFamille.slice(0, TOP_N_FAMILLES).map(f => f.label);
+  const familleAutres = parFamille.length > TOP_N_FAMILLES;
+  const legendeFamilles = famillesTop.map((label, i) => ({ label, couleur: FO_COULEURS[i] }));
+  if (familleAutres) legendeFamilles.push({ label: `Autres (${parFamille.length - TOP_N_FAMILLES})`, couleur: FO_COULEUR_AUTRES });
+  const couleurFamille = cat => {
+    const i = famillesTop.indexOf(cat);
+    return i !== -1 ? FO_COULEURS[i] : FO_COULEUR_AUTRES;
+  };
+
+  const annees = [...new Set(sessions.map(s => s.date_debut.slice(0, 4)))].sort();
+  const parAnnee = {};
+  const parAnneeFamille = {};
+  annees.forEach(a => { parAnnee[a] = 0; parAnneeFamille[a] = {}; });
+  sessions.forEach(s => {
+    const annee = s.date_debut.slice(0, 4);
+    parAnnee[annee] += 1;
+    const catBrute = s.formations_catalogue?.categorie || 'Non catégorisé';
+    const cat = famillesTop.includes(catBrute) ? catBrute : 'Autres';
+    parAnneeFamille[annee][cat] = (parAnneeFamille[annee][cat] || 0) + 1;
+  });
+  const sessionsParAnnee = annees.map(a => ({ label: a, valeur: parAnnee[a], couleur: FO_COULEURS[0] }));
+
   if (!totalSessions) {
     zone.innerHTML = '<div class="carte"><h3 style="margin-top:0;">Sessions</h3><p style="color:#55636c;font-size:13px;">Aucune session assignée à ce formateur.</p></div>';
     return;
@@ -232,6 +259,14 @@ async function chargerStatsFormateur(formateurId) {
     <div class="carte">
       <h3 style="margin-top:0;">Stagiaires formés par famille de formation</h3>
       ${foBarresHorizontales(enBarres(parFamille, 'stagiaires'), '')}
+    </div>
+    <div class="carte">
+      <h3 style="margin-top:0;">Nombre de sessions par année</h3>
+      ${foBarresVerticales(sessionsParAnnee)}
+    </div>
+    <div class="carte">
+      <h3 style="margin-top:0;">Nombre de sessions par année et par famille de formation</h3>
+      ${foBarresVerticalesEmpilees(annees, parAnneeFamille, legendeFamilles)}
     </div>
     <div class="carte">
       <h3 style="margin-top:0;">Sessions (${totalSessions})</h3>
@@ -275,4 +310,55 @@ function foBarresHorizontales(items, unite) {
         <div style="flex:0 0 70px;text-align:right;font-size:13px;font-variant-numeric:tabular-nums;color:#55636c;">${esc(String(i.valeur))}${unite === 'h' ? ' h' : ''}</div>
       </div>`).join('')}
   </div>`;
+}
+
+// Barres verticales simples (une série, un bâton par année) : bout haut
+// arrondi, valeur au-dessus, libellé (année) en-dessous.
+function foBarresVerticales(items) {
+  const donnees = items.filter(i => i.valeur > 0);
+  if (!donnees.length) return '<p style="color:#55636c;font-size:13px;">Aucune donnée.</p>';
+  const max = Math.max(1, ...donnees.map(i => i.valeur));
+  return `<div style="display:flex;align-items:flex-end;gap:10px;height:180px;padding-top:20px;">
+    ${donnees.map(i => `
+      <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;">
+        <div style="font-size:11px;color:#55636c;margin-bottom:4px;">${i.valeur}</div>
+        <div style="width:100%;max-width:28px;height:${Math.max((i.valeur / max) * 100, 3)}%;background:${i.couleur};border-radius:4px 4px 0 0;" title="${esc(i.label)} : ${i.valeur}"></div>
+        <div style="font-size:11px;color:#55636c;margin-top:6px;">${esc(i.label)}</div>
+      </div>`).join('')}
+  </div>`;
+}
+
+// Barres verticales empilées (une série par famille de formation, un bâton
+// par année) + légende (mandatoire dès 2 séries). parAnneeFamille[année] =
+// { famille: n }.
+function foBarresVerticalesEmpilees(annees, parAnneeFamille, legende) {
+  const donnees = annees.filter(a => Object.keys(parAnneeFamille[a] || {}).length);
+  if (!donnees.length) return '<p style="color:#55636c;font-size:13px;">Aucune donnée.</p>';
+  const couleurDe = cat => (legende.find(l => l.label === cat || l.label.startsWith(cat + ' ('))?.couleur) || FO_COULEUR_AUTRES;
+  const totauxParAnnee = donnees.map(a => Object.values(parAnneeFamille[a]).reduce((x, y) => x + y, 0));
+  const max = Math.max(1, ...totauxParAnnee);
+
+  const colonnes = donnees.map((annee, i) => {
+    const repart = parAnneeFamille[annee];
+    const entrees = Object.entries(repart).sort((a, b) => {
+      const oa = legende.findIndex(l => l.label === a[0] || l.label.startsWith(a[0] + ' ('));
+      const ob = legende.findIndex(l => l.label === b[0] || l.label.startsWith(b[0] + ' ('));
+      return oa - ob;
+    });
+    const total = totauxParAnnee[i];
+    return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%;">
+      <div style="font-size:11px;color:#55636c;margin-bottom:4px;">${total}</div>
+      <div style="width:100%;max-width:28px;height:${Math.max((total / max) * 100, 3)}%;display:flex;flex-direction:column-reverse;border-radius:4px 4px 0 0;overflow:hidden;">
+        ${entrees.map(([cat, n]) => `<div style="width:100%;height:${total ? (n / total) * 100 : 0}%;background:${couleurDe(cat)};" title="${esc(cat)} : ${n}"></div>`).join('')}
+      </div>
+      <div style="font-size:11px;color:#55636c;margin-top:6px;">${esc(annee)}</div>
+    </div>`;
+  }).join('');
+
+  return `<div style="display:flex;align-items:flex-end;gap:10px;height:180px;padding-top:20px;margin-bottom:14px;">${colonnes}</div>
+    <div style="display:flex;flex-wrap:wrap;gap:12px 18px;">
+      ${legende.map(l => `<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#1c2b36;">
+        <span style="width:12px;height:12px;border-radius:3px;background:${l.couleur};display:inline-block;"></span>${esc(l.label)}
+      </div>`).join('')}
+    </div>`;
 }

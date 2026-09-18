@@ -112,14 +112,17 @@ async function ecranSessions(vue) {
       </div>
       <p style="font-size:12px;color:#55636c;margin:8px 0 0;">"Sans stagiaire uniquement" aide à repérer les sessions vides créées par erreur (ex. doublons d'un import) — ouvre la session puis utilise "Supprimer" pour la retirer.</p>
       <div id="bulk-suppression-zone"></div>
+      <div id="bulk-formateur-zone"></div>
     </div>
     <div class="carte"><div id="liste-sessions">Chargement…</div></div>`;
 
-  const { data, error } = await supa
-    .from('sessions_formation')
-    .select('id, numero_session, date_debut, date_fin, lieu, statut, formations_catalogue(denomination), session_clients(clients(raison_sociale)), session_participants(count)')
-    .order('date_debut', { ascending: false })
-    .limit(300);
+  const [{ data, error }, { data: formateurs }] = await Promise.all([
+    supa.from('sessions_formation')
+      .select('id, numero_session, date_debut, date_fin, lieu, statut, formateur_id, formations_catalogue(denomination), session_clients(clients(raison_sociale)), session_participants(count)')
+      .order('date_debut', { ascending: false })
+      .limit(300),
+    supa.from('profils').select('id, nom, prenom, formateur_externe').eq('actif', true).order('nom'),
+  ]);
 
   const zone = $('#liste-sessions');
   if (error) { DEBUG.erreur('ecranSessions', error); zone.textContent = 'Erreur de chargement.'; return; }
@@ -128,6 +131,7 @@ async function ecranSessions(vue) {
     s.__nbStagiaires = s.session_participants?.[0]?.count || 0;
   });
   window.__sessionsToutes = data || [];
+  window.__sessionsFormateursDisponibles = formateurs || [];
   filtrerEtAfficherSessions();
 }
 
@@ -168,6 +172,7 @@ function filtrerEtAfficherSessions() {
   });
 
   rendreZoneSuppressionGroupee();
+  rendreZoneAssignationFormateurGroupee();
 
   if (data.length === 0) { zone.innerHTML = '<p style="color:#55636c;">Aucune session ne correspond à ces critères.</p>'; return; }
 
@@ -203,6 +208,42 @@ function rendreZoneSuppressionGroupee() {
       </button>
     </div>
     <div id="suppression-groupee-zone"></div>`;
+}
+
+function rendreZoneAssignationFormateurGroupee() {
+  const zone = $('#bulk-formateur-zone');
+  if (!zone) return;
+  if (!PEUT_GERER_SESSIONS()) { zone.innerHTML = ''; return; }
+
+  const cibles = (window.__sessionsToutes || []).filter(s => !s.formateur_id);
+  const formateurs = window.__sessionsFormateursDisponibles || [];
+  if (cibles.length === 0 || formateurs.length === 0) { zone.innerHTML = ''; return; }
+
+  zone.innerHTML = `
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid #eee;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+      <div>
+        <label for="bulk-formateur-select">Assigner un formateur aux ${cibles.length} session(s) sans formateur</label>
+        <select id="bulk-formateur-select" style="min-width:220px;">
+          ${formateurs.map(f => `<option value="${f.id}">${esc(f.prenom + ' ' + f.nom)}${f.formateur_externe ? ' (externe)' : ''}</option>`).join('')}
+        </select>
+      </div>
+      <button class="bouton" onclick="assignerFormateurGroupe()">Assigner</button>
+    </div>
+    <p style="font-size:12px;color:#55636c;margin:6px 0 0;">Pratique pour rattraper les sessions importées sans formateur renseigné — vérifie ensuite au cas par cas si plusieurs formateurs étaient réellement concernés.</p>`;
+}
+
+async function assignerFormateurGroupe() {
+  const formateurId = $('#bulk-formateur-select')?.value;
+  if (!formateurId) return;
+  const cibles = (window.__sessionsToutes || []).filter(s => !s.formateur_id);
+  if (cibles.length === 0) return;
+  if (!confirm(`Assigner ce formateur à ${cibles.length} session(s) sans formateur ?`)) return;
+
+  const ids = cibles.map(s => s.id);
+  const { error } = await supa.from('sessions_formation').update({ formateur_id: formateurId }).in('id', ids);
+  if (error) { DEBUG.erreur('assignerFormateurGroupe', error); toast('Erreur : ' + error.message, 'erreur'); return; }
+  toast(`Formateur assigné à ${cibles.length} session(s).`);
+  ecranSessions($('#vue'));
 }
 
 function ouvrirConfirmationSuppressionGroupee() {
@@ -244,6 +285,7 @@ let __nsCompteurLigneClient = 0;
 async function ecranNouvelleSession(vue) {
   const { data: clients } = await supa.from('clients').select('id, raison_sociale').eq('actif', true).order('raison_sociale');
   const { data: formations } = await supa.from('formations_catalogue').select('id, code, categorie, denomination').eq('actif', true).order('categorie').order('denomination');
+  const { data: formateurs } = await supa.from('profils').select('id, nom, prenom, formateur_externe').eq('actif', true).order('nom');
 
   const parCategorie = {};
   (formations || []).forEach(f => { (parCategorie[f.categorie] = parCategorie[f.categorie] || []).push(f); });
@@ -285,6 +327,13 @@ async function ecranNouvelleSession(vue) {
         ${(clients || []).map(c => `<option data-id="${c.id}" value="${esc(c.raison_sociale)}">`).join('')}
       </datalist>
       <button class="bouton" style="background:#eee;color:#333;font-size:13px;padding:6px 12px;margin-top:6px;" onclick="ajouterLigneClientSession()">+ Ajouter un client</button>
+
+      <label for="ns-formateur" style="margin-top:14px;">Formateur</label>
+      <select id="ns-formateur">
+        <option value="">— Aucun / à définir —</option>
+        ${(formateurs || []).map(f => `<option value="${f.id}" ${S.profil.role === 'formateur' && f.id === S.profil.id ? 'selected' : ''}>${esc(f.prenom + ' ' + f.nom)}${f.formateur_externe ? ' (externe)' : ''}</option>`).join('')}
+      </select>
+      <p style="font-size:12px;color:#55636c;margin:2px 0 0;">Sert au calcul des heures de formation par formateur (BPF cadre D et E) — assigne-le même s'il n'est pas encore connu de tous les stagiaires.</p>
 
       <label for="ns-modalite" style="margin-top:14px;">Modalité</label>
       <select id="ns-modalite">
@@ -345,7 +394,7 @@ async function ecranNouvelleSession(vue) {
       modalite: $('#ns-modalite').value,
       origine_financement: origineFinancement,
       sous_traitance_recue: sousTraitanceRecue,
-      formateur_id: S.profil.role === 'formateur' ? S.profil.id : null,
+      formateur_id: $('#ns-formateur').value || null,
     }).select().single();
 
     if (error) { DEBUG.erreur('creerSession', error); $('#ns-erreur').textContent = 'Erreur : ' + error.message; return; }
@@ -427,9 +476,10 @@ async function ouvrirSession(id) {
 
   if (error) { DEBUG.erreur('ouvrirSession', error); vue.innerHTML = '<div class="carte">Session introuvable ou accès refusé.</div>'; return; }
 
-  const [{ data: participants }, { data: sessionClients }] = await Promise.all([
+  const [{ data: participants }, { data: sessionClients }, { data: formateursDisponibles }] = await Promise.all([
     supa.from('session_participants').select('*, stagiaires(civilite, nom, prenom, date_naissance), clients(raison_sociale, ville)').eq('session_id', id),
     supa.from('session_clients').select('*, clients(raison_sociale, ville)').eq('session_id', id).order('created_at'),
+    PEUT_GERER_SESSIONS() ? supa.from('profils').select('id, nom, prenom, formateur_externe').eq('actif', true).order('nom') : Promise.resolve({ data: [] }),
   ]);
 
   window.__sessionClients = sessionClients || [];
@@ -473,7 +523,13 @@ async function ouvrirSession(id) {
     </div>
 
     <div class="carte">
-      <h3 style="margin-top:0;">Financement</h3>
+      <h3 style="margin-top:0;">Financement et formateur</h3>
+      <label for="sess-formateur">Formateur</label>
+      <select id="sess-formateur" style="max-width:420px;">
+        <option value="">— Aucun / à définir —</option>
+        ${(formateursDisponibles || []).map(f => `<option value="${f.id}" ${f.id === session.formateur_id ? 'selected' : ''}>${esc(f.prenom + ' ' + f.nom)}${f.formateur_externe ? ' (externe)' : ''}</option>`).join('')}
+      </select>
+      <p style="font-size:12px;color:#55636c;margin:2px 0 8px;">Sert au calcul des heures par formateur (BPF cadres D et E).</p>
       <label for="sess-modalite">Modalité</label>
       <select id="sess-modalite" style="max-width:420px;">
         <option value="presentiel" ${session.modalite === 'presentiel' ? 'selected' : ''}>Présentiel</option>
@@ -629,13 +685,15 @@ async function enregistrerFinancementSession(sessionId) {
   const origine = $('#sess-origine').value;
   const sousTraitance = $('#sess-sous-traitance').checked;
   const modalite = $('#sess-modalite').value;
-  const { error } = await supa.from('sessions_formation').update({ origine_financement: origine, sous_traitance_recue: sousTraitance, modalite }).eq('id', sessionId);
+  const formateurId = $('#sess-formateur')?.value || null;
+  const { error } = await supa.from('sessions_formation').update({ origine_financement: origine, sous_traitance_recue: sousTraitance, modalite, formateur_id: formateurId }).eq('id', sessionId);
   if (error) { DEBUG.erreur('enregistrerFinancementSession', error); toast('Erreur : ' + error.message, 'erreur'); return; }
   toast('Financement mis à jour.');
   if (window.__sessionCourante) {
     window.__sessionCourante.origine_financement = origine;
     window.__sessionCourante.sous_traitance_recue = sousTraitance;
     window.__sessionCourante.modalite = modalite;
+    window.__sessionCourante.formateur_id = formateurId;
   }
 }
 

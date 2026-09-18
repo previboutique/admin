@@ -6,8 +6,8 @@
 // projet Supabase (Supabase → Project Settings → API). La clé "anon" est
 // publique par conception : c'est la Row Level Security côté base qui protège
 // les données, pas le secret de cette clé.
-const SUPABASE_URL = 'https://TON-PROJET.supabase.co';
-const SUPABASE_ANON_KEY = 'TA-CLE-ANON-PUBLIQUE';
+const SUPABASE_URL = 'https://kzahahrnauynnrfznkje.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_VpOYj7KajWRHJKyjPyLh_g_mgabFpgZ';
 
 const supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 

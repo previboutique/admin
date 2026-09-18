@@ -32,7 +32,20 @@
   nav.tabs { display: flex; gap: 4px; padding: 0 20px; background: #fff; border-bottom: 1px solid var(--bordure); overflow-x: auto; }
   nav.tabs button { border: none; background: none; padding: 12px 14px; font-size: 14px; cursor: pointer; color: #55636c; border-bottom: 2px solid transparent; white-space: nowrap; }
   nav.tabs button.actif { color: var(--primaire); border-bottom-color: var(--primaire); font-weight: 600; }
+  .app-corps { display: flex; align-items: flex-start; }
+  nav.menu-lateral { flex: 0 0 210px; width: 210px; background: #fff; border-right: 1px solid var(--bordure); padding: 10px 0; min-height: calc(100vh - 57px); }
+  nav.menu-lateral button { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: none; background: none; padding: 11px 18px; font-size: 14px; cursor: pointer; color: #55636c; border-left: 3px solid transparent; }
+  nav.menu-lateral button .cat-icone { font-size: 16px; line-height: 1; }
+  nav.menu-lateral button.actif { color: var(--primaire); background: #eaf3f9; border-left-color: var(--primaire); font-weight: 600; }
+  nav.menu-lateral button:hover:not(.actif) { background: #f4f6f8; }
+  .app-contenu { flex: 1; min-width: 0; }
   main#vue { max-width: 1000px; margin: 0 auto; padding: 24px 20px 60px; }
+  @media (max-width: 760px) {
+    .app-corps { flex-direction: column; }
+    nav.menu-lateral { width: 100%; flex-direction: row; display: flex; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--bordure); padding: 4px; min-height: 0; }
+    nav.menu-lateral button { width: auto; white-space: nowrap; border-left: none; border-bottom: 3px solid transparent; padding: 9px 14px; }
+    nav.menu-lateral button.actif { border-left-color: transparent; border-bottom-color: var(--primaire); background: none; }
+  }
   .carte { background: #fff; border: 1px solid var(--bordure); border-radius: 8px; padding: 20px; margin-bottom: 16px; }
   input, select, textarea { font: inherit; padding: 8px 10px; border: 1px solid var(--bordure); border-radius: 6px; width: 100%; }
   label { display: block; font-size: 13px; margin: 10px 0 4px; color: #55636c; }
@@ -53,9 +66,13 @@
   <div id="zone-utilisateur"></div>
 </header>
 
-<nav class="tabs" id="onglets"></nav>
-
-<main id="vue"></main>
+<div class="app-corps">
+  <nav class="menu-lateral" id="menu-lateral"></nav>
+  <div class="app-contenu">
+    <nav class="tabs" id="onglets"></nav>
+    <main id="vue"></main>
+  </div>
+</div>
 
 <div id="debug-panel"></div>
 
@@ -79,6 +96,7 @@
 <script src="clients.js"></script>
 <script src="bpf.js"></script>
 <script src="formateurs.js"></script>
+<script src="dashboard_intervenants.js"></script>
 <script src="organisation.js"></script>
 <script src="app.js"></script>
 

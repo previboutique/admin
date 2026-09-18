@@ -17,7 +17,8 @@ const S = {
   profil: null,         // ligne "profils" de l'utilisateur connecté
   organisation: null,   // ligne "organisations" de l'utilisateur connecté
   vision: null,          // rôle actif affiché (peut différer de profil.role pour l'ergonomie)
-  ongletActif: null,
+  categorieActive: null, // id de la catégorie sélectionnée dans le menu latéral
+  ongletActif: null,     // id du sous-onglet affiché dans la catégorie active
 };
 
 function $(sel, ctx) { return (ctx || document).querySelector(sel); }
@@ -37,11 +38,18 @@ function toast(msg, type) {
   setTimeout(() => el.remove(), 3500);
 }
 
-// Liste des onglets par rôle. Calculée dynamiquement selon S.vision.
-// [id, libellé] — filtrée par ROLES_ONGLETS[role] défini dans app.js.
-function onglestPourRole(role) {
-  const table = window.ROLES_ONGLETS || {};
+// Catégories du menu latéral par rôle. Calculées dynamiquement selon
+// S.vision — table CATEGORIES_MENU[role] définie dans app.js. Chaque
+// catégorie : { id, libelle, icone, onglets: [[id, libellé], ...] }.
+function categoriesPourRole(role) {
+  const table = window.CATEGORIES_MENU || {};
   return table[role] || [];
+}
+
+// Retrouve la catégorie qui contient un sous-onglet donné (utile quand
+// allerA(id) est appelé directement, sans passer par le menu latéral).
+function categorieDeLOnglet(ongletId) {
+  return categoriesPourRole(S.vision).find(cat => cat.onglets.some(([id]) => id === ongletId));
 }
 
 async function chargerProfil() {
@@ -97,11 +105,27 @@ function appliquerIdentiteVisuelle() {
   }
 }
 
-function rendreOnglets() {
-  const nav = $('#onglets');
+function rendreMenuLateral() {
+  const nav = $('#menu-lateral');
+  if (!nav) return;
   nav.innerHTML = '';
-  const onglets = onglestPourRole(S.vision);
-  onglets.forEach(([id, libelle]) => {
+  categoriesPourRole(S.vision).forEach(cat => {
+    const btn = document.createElement('button');
+    btn.innerHTML = `<span class="cat-icone">${cat.icone || ''}</span><span>${esc(cat.libelle)}</span>`;
+    btn.className = cat.id === S.categorieActive ? 'actif' : '';
+    btn.onclick = () => allerACategorie(cat.id);
+    nav.appendChild(btn);
+  });
+}
+
+function rendreSousOnglets() {
+  const nav = $('#onglets');
+  if (!nav) return;
+  nav.innerHTML = '';
+  const cat = categoriesPourRole(S.vision).find(c => c.id === S.categorieActive);
+  if (!cat || cat.onglets.length <= 1) { nav.style.display = 'none'; return; }
+  nav.style.display = '';
+  cat.onglets.forEach(([id, libelle]) => {
     const btn = document.createElement('button');
     btn.textContent = libelle;
     btn.className = id === S.ongletActif ? 'actif' : '';
@@ -110,9 +134,22 @@ function rendreOnglets() {
   });
 }
 
+// Sélectionne une catégorie du menu latéral et ouvre son premier sous-onglet
+// (c'est aussi ce qui ouvre directement une catégorie à un seul onglet, ex.
+// Accueil, puisqu'il n'y a alors qu'un choix possible).
+function allerACategorie(catId) {
+  const cat = categoriesPourRole(S.vision).find(c => c.id === catId);
+  if (!cat || !cat.onglets.length) return;
+  S.categorieActive = catId;
+  allerA(cat.onglets[0][0]);
+}
+
 function allerA(id) {
   S.ongletActif = id;
-  rendreOnglets();
+  const cat = categorieDeLOnglet(id);
+  if (cat) S.categorieActive = cat.id;
+  rendreMenuLateral();
+  rendreSousOnglets();
   const dispatch = window.DISPATCH_ONGLETS || {};
   const fn = dispatch[id];
   const vue = $('#vue');
@@ -132,6 +169,7 @@ async function deconnexion() {
 function rendreEcranConnexion() {
   const vue = $('#vue');
   $('#onglets').innerHTML = '';
+  $('#menu-lateral').innerHTML = '';
   vue.innerHTML = `
     <div class="carte" style="max-width:360px;margin:60px auto;">
       <h2 style="margin-top:0;font-size:18px;">Connexion</h2>
@@ -168,8 +206,8 @@ async function demarrer() {
     <button class="bouton" style="background:#fff2;padding:6px 12px;" id="btn-deconnexion">Déconnexion</button>`;
   $('#btn-deconnexion').onclick = deconnexion;
 
-  const onglets = onglestPourRole(S.vision);
-  allerA(onglets[0] ? onglets[0][0] : null);
+  const categories = categoriesPourRole(S.vision);
+  if (categories[0]) allerACategorie(categories[0].id);
 }
 
 supa.auth.onAuthStateChange((event) => {

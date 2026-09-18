@@ -231,33 +231,37 @@ function rendreZoneAssignationFormateurGroupee() {
   if (toutesSansFormateur.length === 0 || formateurs.length === 0) { zone.innerHTML = ''; return; }
 
   zone.innerHTML = `
-    <div style="margin-top:10px;padding-top:10px;border-top:1px solid #eee;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
-      <div>
-        <label for="bulk-formateur-select">Assigner un formateur aux sessions sans formateur</label>
-        <select id="bulk-formateur-select" style="min-width:220px;">
-          ${formateurs.map(f => `<option value="${f.id}">${esc(f.prenom + ' ' + f.nom)}${f.formateur_externe ? ' (externe)' : ''}</option>`).join('')}
-        </select>
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid #eee;">
+      <p style="font-size:13px;font-weight:600;margin:0 0 6px;">
+        Assigner un formateur à <span id="bulk-formateur-compte">${toutesSansFormateur.length}</span> session(s) sans formateur
+      </p>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+        <div>
+          <label for="bulk-formateur-select">Formateur</label>
+          <select id="bulk-formateur-select" style="min-width:220px;">
+            ${formateurs.map(f => `<option value="${f.id}">${esc(f.prenom + ' ' + f.nom)}${f.formateur_externe ? ' (externe)' : ''}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label for="bulk-formateur-date-debut">Du</label>
+          <input id="bulk-formateur-date-debut" type="date" oninput="rafraichirCompteFormateurGroupe()" onchange="rafraichirCompteFormateurGroupe()">
+        </div>
+        <div>
+          <label for="bulk-formateur-date-fin">Au</label>
+          <input id="bulk-formateur-date-fin" type="date" oninput="rafraichirCompteFormateurGroupe()" onchange="rafraichirCompteFormateurGroupe()">
+        </div>
+        <button class="bouton" onclick="assignerFormateurGroupe()">Assigner</button>
       </div>
-      <div>
-        <label for="bulk-formateur-date-debut">Du</label>
-        <input id="bulk-formateur-date-debut" type="date" onchange="rafraichirCompteFormateurGroupe()">
-      </div>
-      <div>
-        <label for="bulk-formateur-date-fin">Au</label>
-        <input id="bulk-formateur-date-fin" type="date" onchange="rafraichirCompteFormateurGroupe()">
-      </div>
-      <button class="bouton" onclick="assignerFormateurGroupe()">Assigner</button>
-    </div>
-    <p style="font-size:12px;color:#55636c;margin:6px 0 0;">
-      <span id="bulk-formateur-compte">${toutesSansFormateur.length} session(s) sans formateur</span> —
-      laisse les dates vides pour prendre toutes les sessions sans formateur, ou précise une période pour ne cibler que celles-là.
-      Vérifie ensuite au cas par cas si plusieurs formateurs étaient réellement concernés.
-    </p>`;
+      <p style="font-size:12px;color:#55636c;margin:6px 0 0;">
+        Laisse les dates vides pour prendre toutes les sessions sans formateur, ou précise une période (date de début de session) pour ne cibler que celles-là.
+        Vérifie ensuite au cas par cas si plusieurs formateurs étaient réellement concernés.
+      </p>
+    </div>`;
 }
 
 function rafraichirCompteFormateurGroupe() {
   const compte = $('#bulk-formateur-compte');
-  if (compte) compte.textContent = `${sessionsSansFormateurDansPlage().length} session(s) sans formateur dans cette période`;
+  if (compte) compte.textContent = sessionsSansFormateurDansPlage().length;
 }
 
 async function assignerFormateurGroupe() {

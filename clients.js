@@ -225,6 +225,26 @@ async function ouvrirFicheClient(id) {
       </div>
       <label for="ci-secteur">Secteur d'activité</label>
       <input id="ci-secteur" value="${client ? esc(client.secteur_activite) : ''}">
+      <div style="display:flex;gap:10px;">
+        <div style="flex:1;">
+          <label for="ci-financement">Type de financement</label>
+          <select id="ci-financement">
+            <option value="" ${!client || !client.type_financement ? 'selected' : ''}>— Non renseigné —</option>
+            <option value="entreprise" ${client?.type_financement === 'entreprise' ? 'selected' : ''}>Entreprise (règle elle-même)</option>
+            <option value="opco" ${client?.type_financement === 'opco' ? 'selected' : ''}>OPCO</option>
+            <option value="autre" ${client?.type_financement === 'autre' ? 'selected' : ''}>Autre (CPF, France Travail, Conseil régional…)</option>
+          </select>
+        </div>
+        <div style="flex:1;" id="ci-opco-zone">
+          <label for="ci-opco-nom">Nom de l'OPCO</label>
+          <input id="ci-opco-nom" value="${client ? esc(client.opco_nom) : ''}" placeholder="ex. Constructys, AKTO…" list="ci-opco-liste">
+          <datalist id="ci-opco-liste">
+            <option value="AFDAS"><option value="AKTO"><option value="ATLAS"><option value="Constructys">
+            <option value="EP+"><option value="OCAPIAT"><option value="OPCO 2i"><option value="OPCO Mobilités">
+            <option value="OPCO Santé"><option value="Opcommerce"><option value="Uniformation">
+          </datalist>
+        </div>
+      </div>
       <label for="ci-notes">Notes</label>
       <textarea id="ci-notes" rows="2">${client ? esc(client.notes) : ''}</textarea>
       <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
@@ -253,7 +273,15 @@ async function ouvrirFicheClient(id) {
       <div id="stat-form"></div>
     </div>` : ''}`;
 
+  const majZoneOpco = () => {
+    const zone = $('#ci-opco-zone');
+    if (zone) zone.style.display = $('#ci-financement').value === 'opco' ? '' : 'none';
+  };
+  majZoneOpco();
+  $('#ci-financement').onchange = majZoneOpco;
+
   $('#ci-valider').onclick = async () => {
+    const typeFinancement = $('#ci-financement').value || null;
     const payload = {
       organisation_id: S.organisation.id,
       raison_sociale: $('#ci-raison').value.trim(),
@@ -264,6 +292,8 @@ async function ouvrirFicheClient(id) {
       code_postal: $('#ci-cp').value.trim() || null,
       ville: $('#ci-ville').value.trim() || null,
       secteur_activite: $('#ci-secteur').value.trim() || null,
+      type_financement: typeFinancement,
+      opco_nom: typeFinancement === 'opco' ? ($('#ci-opco-nom').value.trim() || null) : null,
       notes: $('#ci-notes').value.trim() || null,
       actif: $('#ci-actif').checked,
     };

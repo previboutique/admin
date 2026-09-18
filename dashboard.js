@@ -23,6 +23,15 @@ async function ecranAccueil(vue) {
     </div>
     <div class="carte">
       <h3 style="margin-top:0;">Recyclages à programmer <span style="font-weight:400;font-size:13px;color:#55636c;">(échéance dans les ${HORIZON_RELANCE_JOURS} jours, ou dépassée)</span></h3>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+        <div style="flex:1;min-width:200px;">
+          <input id="db-recyclages-texte" placeholder="Filtrer par stagiaire, client ou formation…" oninput="filtrerEtAfficherRecyclages()">
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;font-weight:normal;white-space:nowrap;">
+          <input type="checkbox" id="db-recyclages-masquer-relances" style="width:auto;" onchange="filtrerEtAfficherRecyclages()">
+          Masquer les relances déjà effectuées
+        </label>
+      </div>
       <div id="db-recyclages">Chargement…</div>
     </div>`;
 
@@ -59,28 +68,57 @@ async function chargerAgenda() {
     </tbody></table>`;
 }
 
+window.__recyclagesTous = [];
+window.__recyclagesRelanceIndex = {};
+
 async function chargerRecyclages() {
   const zone = $('#db-recyclages');
   const limite = new Date();
   limite.setDate(limite.getDate() + HORIZON_RELANCE_JOURS);
   const limiteIso = limite.toISOString().slice(0, 10);
 
-  const { data, error } = await supa
-    .from('v_recyclages_a_programmer')
-    .select('*')
-    .lte('date_echeance', limiteIso)
-    .order('date_echeance', { ascending: true });
+  const [{ data, error }, { data: relances }] = await Promise.all([
+    supa.from('v_recyclages_a_programmer').select('*').lte('date_echeance', limiteIso).order('date_echeance', { ascending: true }),
+    supa.from('relances_recyclage').select('stagiaire_id, formation_id, date_echeance, date_relance'),
+  ]);
 
   if (error) { DEBUG.erreur('chargerRecyclages', error); zone.textContent = 'Erreur de chargement.'; return; }
-  if (!data || data.length === 0) { zone.innerHTML = '<p style="color:#55636c;">Aucun recyclage à programmer d\'ici ' + HORIZON_RELANCE_JOURS + ' jours.</p>'; return; }
 
   // Relances déjà effectuées, pour affichage (pas de suppression de la ligne :
   // on garde la visibilité, mais on indique qu'elle a déjà été relancée).
-  const { data: relances } = await supa.from('relances_recyclage').select('stagiaire_id, formation_id, date_echeance, date_relance');
   const relanceIndex = {};
   (relances || []).forEach(r => { relanceIndex[`${r.stagiaire_id}|${r.formation_id}|${r.date_echeance}`] = r.date_relance; });
 
+  window.__recyclagesTous = data || [];
+  window.__recyclagesRelanceIndex = relanceIndex;
+  filtrerEtAfficherRecyclages();
+}
+
+function filtrerEtAfficherRecyclages() {
+  const zone = $('#db-recyclages');
+  if (!zone) return;
+
+  const texte = ($('#db-recyclages-texte')?.value || '').trim().toLowerCase();
+  const masquerRelances = $('#db-recyclages-masquer-relances')?.checked || false;
+  const relanceIndex = window.__recyclagesRelanceIndex || {};
   const today = new Date().toISOString().slice(0, 10);
+
+  const data = (window.__recyclagesTous || []).filter(r => {
+    const cle = `${r.stagiaire_id}|${r.formation_a_programmer_id}|${r.date_echeance}`;
+    if (masquerRelances && relanceIndex[cle]) return false;
+    if (texte) {
+      const cible = [r.prenom || '', r.nom || '', r.client_nom || '', r.formation_a_programmer_denomination || ''].join(' ').toLowerCase();
+      if (!cible.includes(texte)) return false;
+    }
+    return true;
+  });
+
+  if (data.length === 0) {
+    zone.innerHTML = (window.__recyclagesTous || []).length === 0
+      ? '<p style="color:#55636c;">Aucun recyclage à programmer d\'ici ' + HORIZON_RELANCE_JOURS + ' jours.</p>'
+      : '<p style="color:#55636c;">Aucun recyclage ne correspond à ces critères.</p>';
+    return;
+  }
 
   zone.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:14px;">
     <thead><tr style="text-align:left;color:#55636c;font-size:12px;">

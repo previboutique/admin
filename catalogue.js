@@ -50,7 +50,9 @@ async function chargerCatalogue() {
         <tr style="border-top:1px solid #eee;${f.actif ? '' : 'opacity:.5;'}">
           <td style="padding:6px 8px;width:90px;color:#55636c;">${esc(f.code)}</td>
           <td style="padding:6px 8px;">${esc(f.denomination)}</td>
-          <td style="padding:6px 8px;width:80px;">${f.prix != null ? f.prix + ' €' : '—'}</td>
+          <td style="padding:6px 8px;width:120px;">${(f.prix_individuel != null || f.prix_groupe != null)
+            ? `Ind. ${f.prix_individuel != null ? f.prix_individuel + ' €' : '—'} / Grp ${f.prix_groupe != null ? f.prix_groupe + ' €' : '—'}`
+            : (f.prix != null ? f.prix + ' €' : '—')}</td>
           <td style="padding:6px 8px;width:70px;">${f.duree_heures != null ? f.duree_heures + ' h' : '—'}</td>
           <td style="padding:6px 8px;width:110px;">${f.cycle_mois ? 'recyclage ' + f.cycle_mois + ' mois' : '—'}</td>
           <td style="padding:6px 8px;width:60px;">${f.actif ? '' : '<span style="color:#b3261e;">inactif</span>'}</td>
@@ -88,7 +90,7 @@ function ouvrirFormFormation(id) {
 
       <div style="display:flex;gap:10px;">
         <div style="flex:1;">
-          <label for="cf-prix">Prix (€)</label>
+          <label for="cf-prix">Prix (€) — tarif unique</label>
           <input id="cf-prix" type="number" step="0.01" value="${f && f.prix != null ? f.prix : ''}">
         </div>
         <div style="flex:1;">
@@ -98,6 +100,18 @@ function ouvrirFormFormation(id) {
         <div style="flex:1;">
           <label for="cf-cycle">Cycle recyclage (mois)</label>
           <input id="cf-cycle" type="number" value="${f && f.cycle_mois != null ? f.cycle_mois : ''}" placeholder="vide = pas de recyclage">
+        </div>
+      </div>
+
+      <p style="font-size:12px;color:#55636c;margin:10px 0 2px;">Si cette formation se propose à la fois en individuel et en groupe (tarifs différents), renseigne les deux prix ci-dessous — ils remplacent alors le "Prix" unique ci-dessus pour la création d'une session.</p>
+      <div style="display:flex;gap:10px;">
+        <div style="flex:1;">
+          <label for="cf-prix-individuel">Prix individuel (€)</label>
+          <input id="cf-prix-individuel" type="number" step="0.01" value="${f && f.prix_individuel != null ? f.prix_individuel : ''}">
+        </div>
+        <div style="flex:1;">
+          <label for="cf-prix-groupe">Prix groupe (€)</label>
+          <input id="cf-prix-groupe" type="number" step="0.01" value="${f && f.prix_groupe != null ? f.prix_groupe : ''}">
         </div>
       </div>
 
@@ -152,6 +166,8 @@ function ouvrirFormFormation(id) {
       categorie: $('#cf-categorie').value.trim(),
       denomination: $('#cf-denomination').value.trim(),
       prix: $('#cf-prix').value ? Number($('#cf-prix').value) : null,
+      prix_individuel: $('#cf-prix-individuel').value ? Number($('#cf-prix-individuel').value) : null,
+      prix_groupe: $('#cf-prix-groupe').value ? Number($('#cf-prix-groupe').value) : null,
       duree_heures: $('#cf-duree').value ? Number($('#cf-duree').value) : null,
       cycle_mois: $('#cf-cycle').value ? Number($('#cf-cycle').value) : null,
       formation_recyclage_id: $('#cf-recyclage').value || null,

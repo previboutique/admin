@@ -100,18 +100,17 @@ async function ecranSessions(vue) {
           <input id="filtre-date-fin" type="date" onchange="filtrerEtAfficherSessions()">
         </div>
         <div>
-          <label for="filtre-sans-stagiaire">&nbsp;</label>
-          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;white-space:nowrap;padding:8px 0;">
-            <input type="checkbox" id="filtre-sans-stagiaire" style="width:auto;" onchange="filtrerEtAfficherSessions()">
-            Sans stagiaire uniquement
-          </label>
-        </div>
-        <div>
-          <label for="filtre-sans-formateur">&nbsp;</label>
-          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;white-space:nowrap;padding:8px 0;">
-            <input type="checkbox" id="filtre-sans-formateur" style="width:auto;" onchange="filtrerEtAfficherSessions()">
-            Sans formateur uniquement
-          </label>
+          <label>&nbsp;</label>
+          <div style="display:flex;flex-direction:column;gap:2px;padding:4px 0;">
+            <label for="filtre-sans-stagiaire" style="display:flex;align-items:center;gap:6px;font-weight:normal;white-space:nowrap;margin:0;">
+              <input type="checkbox" id="filtre-sans-stagiaire" style="width:auto;" onchange="filtrerEtAfficherSessions()">
+              Sans stagiaire uniquement
+            </label>
+            <label for="filtre-sans-formateur" style="display:flex;align-items:center;gap:6px;font-weight:normal;white-space:nowrap;margin:0;">
+              <input type="checkbox" id="filtre-sans-formateur" style="width:auto;" onchange="filtrerEtAfficherSessions()">
+              Sans formateur uniquement
+            </label>
+          </div>
         </div>
         <div>
           <button class="bouton" style="background:#eee;color:#333;" onclick="reinitialiserFiltresSessions()">Réinitialiser</button>
@@ -330,7 +329,7 @@ let __nsCompteurLigneClient = 0;
 
 async function ecranNouvelleSession(vue) {
   const { data: clients } = await supa.from('clients').select('id, raison_sociale').eq('actif', true).order('raison_sociale');
-  const { data: formations } = await supa.from('formations_catalogue').select('id, code, categorie, denomination').eq('actif', true).order('categorie').order('denomination');
+  const { data: formations } = await supa.from('formations_catalogue').select('id, code, categorie, denomination, prix, prix_individuel, prix_groupe').eq('actif', true).order('categorie').order('denomination');
   const { data: formateurs } = await supa.from('profils').select('id, nom, prenom, formateur_externe').eq('actif', true).order('nom');
 
   const parCategorie = {};
@@ -351,6 +350,13 @@ async function ecranNouvelleSession(vue) {
             ${fs.map(f => `<option value="${f.id}">${esc(f.denomination)} (${esc(f.code)})</option>`).join('')}
           </optgroup>`).join('')}
       </select>
+      <div id="ns-tarif-zone" style="display:none;">
+        <label for="ns-tarif">Tarif</label>
+        <select id="ns-tarif">
+          <option value="individuel">Individuel</option>
+          <option value="groupe">Groupe</option>
+        </select>
+      </div>
 
       <label for="ns-lieu">Lieu</label>
       <input id="ns-lieu" placeholder="Chez le client, ou adresse du centre">
@@ -408,12 +414,30 @@ async function ecranNouvelleSession(vue) {
 
   ajouterLigneClientSession();
 
+  const prixDeLaFormationChoisie = () => {
+    const f = (formations || []).find(x => x.id === $('#ns-formation').value);
+    if (!f) return null;
+    if (f.prix_individuel != null || f.prix_groupe != null) {
+      return $('#ns-tarif').value === 'groupe' ? f.prix_groupe : f.prix_individuel;
+    }
+    return f.prix;
+  };
+
+  const appliquerPrixSurLignesClientVides = () => {
+    const prix = prixDeLaFormationChoisie();
+    if (prix != null) $$('.ns-client-prix').forEach(input => { if (!input.value) input.value = prix; });
+  };
+
   $('#ns-formation').onchange = (e) => {
     const f = (formations || []).find(x => x.id === e.target.value);
-    if (f && f.prix != null) {
-      $$('.ns-client-prix').forEach(input => { if (!input.value) input.value = f.prix; });
-    }
+    const aDeuxTarifs = f && (f.prix_individuel != null || f.prix_groupe != null);
+    $('#ns-tarif-zone').style.display = aDeuxTarifs ? '' : 'none';
+    appliquerPrixSurLignesClientVides();
   };
+
+  // Ne remplace que les lignes client encore vides (comme au choix initial
+  // de la formation) — une ligne déjà modifiée à la main n'est pas écrasée.
+  $('#ns-tarif').onchange = appliquerPrixSurLignesClientVides;
 
   $('#ns-valider').onclick = async () => {
     const formationId = $('#ns-formation').value;

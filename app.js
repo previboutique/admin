@@ -47,6 +47,6 @@ window.DISPATCH_ONGLETS = {
   'intervenants-dashboard': ecranTableauBordIntervenants, // dashboard_intervenants.js
   'activite-dashboard': ecranTableauBordActivite, // dashboard_activite.js
   organisation: ecranOrganisation, // organisation.js
-  // stagiaires: ecranStagiaires,  // à venir
+  stagiaires: ecranStagiaires,   // stagiaires.js
   // organisations: ecranOrganisations, // à venir (super_admin)
 };

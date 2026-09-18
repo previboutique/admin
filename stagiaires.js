@@ -75,6 +75,7 @@ function detecterDoublonsStagiaires(liste) {
 function rendreDoublonsStagiaires() {
   const zone = $('#stg-doublons');
   const groupes = detecterDoublonsStagiaires(window.__stagiairesTous || []);
+  window.__groupesDoublonsStagiaires = groupes;
   if (!groupes.length) { zone.innerHTML = ''; return; }
 
   zone.innerHTML = `
@@ -104,14 +105,16 @@ function stgRendreGroupeDoublon(groupe, gi) {
             <span style="color:#9aa5ab;"> — créée le ${new Date(s.created_at).toLocaleDateString('fr-FR')}</span>
           </span>
         </label>`).join('')}
-      <button class="bouton" style="margin-top:8px;" onclick="fusionnerGroupeDoublon(${gi}, ${JSON.stringify(groupe.map(s => s.id))})">Fusionner ce groupe</button>
+      <button class="bouton" style="margin-top:8px;" onclick="fusionnerGroupeDoublon(${gi})">Fusionner ce groupe</button>
     </div>`;
 }
 
-async function fusionnerGroupeDoublon(gi, idsGroupe) {
+async function fusionnerGroupeDoublon(gi) {
+  const groupe = (window.__groupesDoublonsStagiaires || [])[gi];
+  if (!groupe) { toast('Groupe introuvable — recharge la page.', 'erreur'); return; }
   const survivant = document.querySelector(`input[name="stg-doublon-${gi}"]:checked`)?.value;
   if (!survivant) { toast('Choisis la fiche à conserver.', 'erreur'); return; }
-  const doublons = idsGroupe.filter(id => id !== survivant);
+  const doublons = groupe.map(s => s.id).filter(id => id !== survivant);
   if (!confirm(`Fusionner ${doublons.length} fiche(s) dans la fiche conservée ? Les sessions des fiches fusionnées seront reportées sur la fiche conservée, puis ces fiches seront supprimées. Cette action est irréversible.`)) return;
 
   const { error } = await supa.rpc('fusionner_stagiaires', { p_survivant: survivant, p_doublons: doublons });

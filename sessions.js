@@ -100,21 +100,32 @@ async function ecranSessions(vue) {
           <input id="filtre-date-fin" type="date" onchange="filtrerEtAfficherSessions()">
         </div>
         <div>
+          <label for="filtre-sans-stagiaire">&nbsp;</label>
+          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;white-space:nowrap;padding:8px 0;">
+            <input type="checkbox" id="filtre-sans-stagiaire" style="width:auto;" onchange="filtrerEtAfficherSessions()">
+            Sans stagiaire uniquement
+          </label>
+        </div>
+        <div>
           <button class="bouton" style="background:#eee;color:#333;" onclick="reinitialiserFiltresSessions()">Réinitialiser</button>
         </div>
       </div>
+      <p style="font-size:12px;color:#55636c;margin:8px 0 0;">"Sans stagiaire uniquement" aide à repérer les sessions vides créées par erreur (ex. doublons d'un import) — ouvre la session puis utilise "Supprimer" pour la retirer.</p>
     </div>
     <div class="carte"><div id="liste-sessions">Chargement…</div></div>`;
 
   const { data, error } = await supa
     .from('sessions_formation')
-    .select('id, numero_session, date_debut, date_fin, lieu, statut, formations_catalogue(denomination), session_clients(clients(raison_sociale))')
+    .select('id, numero_session, date_debut, date_fin, lieu, statut, formations_catalogue(denomination), session_clients(clients(raison_sociale)), session_participants(count)')
     .order('date_debut', { ascending: false })
     .limit(300);
 
   const zone = $('#liste-sessions');
   if (error) { DEBUG.erreur('ecranSessions', error); zone.textContent = 'Erreur de chargement.'; return; }
-  (data || []).forEach(s => { s.__nomsClients = (s.session_clients || []).map(sc => sc.clients?.raison_sociale).filter(Boolean); });
+  (data || []).forEach(s => {
+    s.__nomsClients = (s.session_clients || []).map(sc => sc.clients?.raison_sociale).filter(Boolean);
+    s.__nbStagiaires = s.session_participants?.[0]?.count || 0;
+  });
   window.__sessionsToutes = data || [];
   filtrerEtAfficherSessions();
 }
@@ -124,6 +135,7 @@ function reinitialiserFiltresSessions() {
   $('#filtre-statut').value = '';
   $('#filtre-date-debut').value = '';
   $('#filtre-date-fin').value = '';
+  $('#filtre-sans-stagiaire').checked = false;
   filtrerEtAfficherSessions();
 }
 
@@ -135,11 +147,13 @@ function filtrerEtAfficherSessions() {
   const statut = $('#filtre-statut')?.value || '';
   const dateDebut = $('#filtre-date-debut')?.value || '';
   const dateFin = $('#filtre-date-fin')?.value || '';
+  const sansStagiaire = $('#filtre-sans-stagiaire')?.checked || false;
 
   const data = (window.__sessionsToutes || []).filter(s => {
     if (statut && s.statut !== statut) return false;
     if (dateDebut && s.date_debut < dateDebut) return false;
     if (dateFin && s.date_debut > dateFin) return false;
+    if (sansStagiaire && s.__nbStagiaires > 0) return false;
     if (texte) {
       const cible = [
         s.numero_session || '',
@@ -157,14 +171,15 @@ function filtrerEtAfficherSessions() {
   zone.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:14px;">
     <thead><tr style="text-align:left;color:#55636c;font-size:12px;">
       <th style="padding:6px 8px;">N°</th><th style="padding:6px 8px;">Date</th><th style="padding:6px 8px;">Formation</th>
-      <th style="padding:6px 8px;">Client(s)</th><th style="padding:6px 8px;">Statut</th>
+      <th style="padding:6px 8px;">Client(s)</th><th style="padding:6px 8px;text-align:right;">Stagiaires</th><th style="padding:6px 8px;">Statut</th>
     </tr></thead>
     <tbody>${data.map(s => `
-      <tr style="border-top:1px solid #eee;cursor:pointer;" onclick="ouvrirSession('${s.id}')">
+      <tr style="border-top:1px solid #eee;cursor:pointer;${s.__nbStagiaires === 0 ? 'background:#fdf6e8;' : ''}" onclick="ouvrirSession('${s.id}')">
         <td style="padding:6px 8px;color:#55636c;font-variant-numeric:tabular-nums;">${esc(s.numero_session || '—')}</td>
         <td style="padding:6px 8px;">${formatDateFr(s.date_debut)}</td>
         <td style="padding:6px 8px;">${esc(s.formations_catalogue?.denomination || '')}</td>
         <td style="padding:6px 8px;">${esc((s.__nomsClients || []).join(', ') || '—')}</td>
+        <td style="padding:6px 8px;text-align:right;${s.__nbStagiaires === 0 ? 'color:#b3261e;font-weight:600;' : ''}">${s.__nbStagiaires}</td>
         <td style="padding:6px 8px;">${esc(s.statut)}</td>
       </tr>`).join('')}
     </tbody></table>`;

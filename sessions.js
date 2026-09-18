@@ -107,10 +107,17 @@ async function ecranSessions(vue) {
           </label>
         </div>
         <div>
+          <label for="filtre-sans-formateur">&nbsp;</label>
+          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;white-space:nowrap;padding:8px 0;">
+            <input type="checkbox" id="filtre-sans-formateur" style="width:auto;" onchange="filtrerEtAfficherSessions()">
+            Sans formateur uniquement
+          </label>
+        </div>
+        <div>
           <button class="bouton" style="background:#eee;color:#333;" onclick="reinitialiserFiltresSessions()">Réinitialiser</button>
         </div>
       </div>
-      <p style="font-size:12px;color:#55636c;margin:8px 0 0;">"Sans stagiaire uniquement" aide à repérer les sessions vides créées par erreur (ex. doublons d'un import) — ouvre la session puis utilise "Supprimer" pour la retirer.</p>
+      <p style="font-size:12px;color:#55636c;margin:8px 0 0;">"Sans stagiaire uniquement" aide à repérer les sessions vides créées par erreur (ex. doublons d'un import) — ouvre la session puis utilise "Supprimer" pour la retirer. "Sans formateur uniquement" liste les sessions à compléter (voir aussi l'outil d'assignation rapide ci-dessous, qui porte lui sur toutes les sessions sans formateur, indépendamment de ce filtre).</p>
       <div id="bulk-suppression-zone"></div>
       <div id="bulk-formateur-zone"></div>
     </div>
@@ -141,6 +148,7 @@ function reinitialiserFiltresSessions() {
   $('#filtre-date-debut').value = '';
   $('#filtre-date-fin').value = '';
   $('#filtre-sans-stagiaire').checked = false;
+  $('#filtre-sans-formateur').checked = false;
   filtrerEtAfficherSessions();
 }
 
@@ -153,12 +161,14 @@ function filtrerEtAfficherSessions() {
   const dateDebut = $('#filtre-date-debut')?.value || '';
   const dateFin = $('#filtre-date-fin')?.value || '';
   const sansStagiaire = $('#filtre-sans-stagiaire')?.checked || false;
+  const sansFormateur = $('#filtre-sans-formateur')?.checked || false;
 
   const data = (window.__sessionsToutes || []).filter(s => {
     if (statut && s.statut !== statut) return false;
     if (dateDebut && s.date_debut < dateDebut) return false;
     if (dateFin && s.date_debut > dateFin) return false;
     if (sansStagiaire && s.__nbStagiaires > 0) return false;
+    if (sansFormateur && s.formateur_id) return false;
     if (texte) {
       const cible = [
         s.numero_session || '',

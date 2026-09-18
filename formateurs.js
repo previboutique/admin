@@ -1,9 +1,16 @@
 // © 2026 Admin Formation — Jérémy Bizeul — SARL Prévisecours. Tous droits réservés.
 // formateurs.js — écran Formateurs : liste et fiche des comptes internes
-// (nom, coordonnées, taux horaire, interne/externe), et création de nouveaux
+// (nom, coordonnées, taux horaire, interne/externe), création de nouveaux
 // comptes de connexion via l'Edge Function "creer-compte-formateur" (une clé
 // service_role est nécessaire pour créer un compte, elle ne peut donc pas
-// être appelée directement depuis le navigateur).
+// être appelée directement depuis le navigateur), et — sur la fiche d'un
+// formateur existant — ses sessions et ses statistiques (heures dispensées,
+// stagiaires formés, au total et par formation/famille de formation).
+
+// Palette catégorielle (charte data-viz — ordre fixe, jamais cyclé), reprise
+// telle quelle du tableau de bord Intervenants pour rester cohérent.
+const FO_COULEURS = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300'];
+const FO_COULEUR_AUTRES = '#9aa5ab';
 
 async function ecranFormateurs(vue) {
   vue.innerHTML = `
@@ -87,7 +94,10 @@ async function ouvrirFicheFormateur(id) {
       </div>
       <div class="erreur" id="fo-erreur"></div>
       <div id="fo-resultat"></div>
-    </div>`;
+    </div>
+    <div id="fo-stats"></div>`;
+
+  if (formateur) chargerStatsFormateur(formateur.id);
 
   $('#fo-valider').onclick = async () => {
     const payload = {
@@ -141,4 +151,128 @@ async function ouvrirFicheFormateur(id) {
       $('#fo-erreur').textContent = 'Erreur : ' + e.message;
     }
   };
+}
+
+// ============================================================================
+// SESSIONS ET STATISTIQUES D'UN FORMATEUR — heures dispensées et stagiaires
+// formés, au total et par formation / famille de formation (categorie du
+// catalogue). Les sessions annulées sont exclues (comme sur les autres
+// tableaux de bord).
+// ============================================================================
+
+async function chargerStatsFormateur(formateurId) {
+  const zone = $('#fo-stats');
+  zone.innerHTML = '<div class="carte">Chargement des sessions…</div>';
+
+  const { data, error } = await supa
+    .from('sessions_formation')
+    .select('id, numero_session, date_debut, lieu, statut, formations_catalogue(denomination, categorie, duree_heures), session_participants(count)')
+    .eq('formateur_id', formateurId)
+    .neq('statut', 'annulee')
+    .order('date_debut', { ascending: false });
+
+  if (error) { DEBUG.erreur('chargerStatsFormateur', error); zone.innerHTML = '<div class="carte">Erreur de chargement des sessions.</div>'; return; }
+
+  const sessions = (data || []).map(s => ({
+    ...s,
+    nbStagiaires: s.session_participants?.[0]?.count || 0,
+    heures: Number(s.formations_catalogue?.duree_heures) || 0,
+  }));
+
+  const totalSessions = sessions.length;
+  const totalHeures = sessions.reduce((a, s) => a + s.heures, 0);
+  const totalStagiaires = sessions.reduce((a, s) => a + s.nbStagiaires, 0);
+
+  const regrouper = cle => {
+    const table = {};
+    sessions.forEach(s => {
+      const label = s.formations_catalogue?.[cle] || (cle === 'categorie' ? 'Non catégorisé' : 'Formation inconnue');
+      if (!table[label]) table[label] = { label, sessions: 0, heures: 0, stagiaires: 0 };
+      table[label].sessions += 1;
+      table[label].heures += s.heures;
+      table[label].stagiaires += s.nbStagiaires;
+    });
+    return Object.values(table).sort((a, b) => b.heures - a.heures);
+  };
+
+  const parFormation = regrouper('denomination');
+  const parFamille = regrouper('categorie');
+
+  const enBarres = (liste, unite) => {
+    const TOP_N = 6;
+    const items = liste.slice(0, TOP_N).map((l, i) => ({ label: l.label, valeur: l[unite], couleur: FO_COULEURS[i] }));
+    if (liste.length > TOP_N) {
+      const reste = liste.slice(TOP_N).reduce((a, l) => a + l[unite], 0);
+      items.push({ label: `Autres (${liste.length - TOP_N})`, valeur: reste, couleur: FO_COULEUR_AUTRES });
+    }
+    return items;
+  };
+
+  if (!totalSessions) {
+    zone.innerHTML = '<div class="carte"><h3 style="margin-top:0;">Sessions</h3><p style="color:#55636c;font-size:13px;">Aucune session assignée à ce formateur.</p></div>';
+    return;
+  }
+
+  zone.innerHTML = `
+    <div class="carte">
+      <div style="display:flex;gap:24px;flex-wrap:wrap;">
+        ${foStatTuile('Sessions', totalSessions)}
+        ${foStatTuile('Heures dispensées', totalHeures)}
+        ${foStatTuile('Stagiaires formés', totalStagiaires)}
+      </div>
+    </div>
+    <div class="carte">
+      <h3 style="margin-top:0;">Heures dispensées par formation</h3>
+      ${foBarresHorizontales(enBarres(parFormation, 'heures'), 'h')}
+    </div>
+    <div class="carte">
+      <h3 style="margin-top:0;">Heures dispensées par famille de formation</h3>
+      ${foBarresHorizontales(enBarres(parFamille, 'heures'), 'h')}
+    </div>
+    <div class="carte">
+      <h3 style="margin-top:0;">Stagiaires formés par famille de formation</h3>
+      ${foBarresHorizontales(enBarres(parFamille, 'stagiaires'), '')}
+    </div>
+    <div class="carte">
+      <h3 style="margin-top:0;">Sessions (${totalSessions})</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <tbody>${sessions.map(s => `
+          <tr style="border-top:1px solid #eee;cursor:pointer;" onclick="ouvrirSession('${s.id}')">
+            <td style="padding:6px 8px;color:#55636c;white-space:nowrap;">${s.date_debut ? new Date(s.date_debut).toLocaleDateString('fr-FR') : ''}</td>
+            <td style="padding:6px 8px;">${esc(s.formations_catalogue?.denomination || '')}</td>
+            <td style="padding:6px 8px;color:#55636c;">${esc(s.formations_catalogue?.categorie || '')}</td>
+            <td style="padding:6px 8px;color:#55636c;">${esc(s.lieu || '')}</td>
+            <td style="padding:6px 8px;color:#55636c;text-align:right;">${s.heures ? s.heures + ' h' : ''}</td>
+            <td style="padding:6px 8px;color:#55636c;text-align:right;">${s.nbStagiaires} stag.</td>
+            <td style="padding:6px 8px;color:#55636c;">${{ planifiee: 'Planifiée', en_cours: 'En cours', terminee: 'Terminée' }[s.statut] || s.statut}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+function foStatTuile(libelle, valeur) {
+  return `<div>
+    <div style="font-size:12px;color:#55636c;">${esc(libelle)}</div>
+    <div style="font-size:28px;font-weight:600;color:#1c2b36;">${esc(String(valeur))}</div>
+  </div>`;
+}
+
+// Barres horizontales : label à gauche, barre colorée (<=24px de haut, bout
+// arrondi), valeur au bout. Légende omise volontairement (chaque barre porte
+// déjà son libellé — l'identité n'a pas besoin de la couleur seule).
+function foBarresHorizontales(items, unite) {
+  const donnees = items.filter(i => i.valeur > 0);
+  if (donnees.length === 0) return '<p style="color:#55636c;font-size:13px;">Aucune donnée.</p>';
+  const max = Math.max(...donnees.map(i => i.valeur));
+  return `<div style="display:flex;flex-direction:column;gap:10px;">
+    ${donnees.map(i => `
+      <div style="display:flex;align-items:center;gap:10px;" title="${esc(i.label)} : ${esc(String(i.valeur))}${unite === 'h' ? ' h' : ''}">
+        <div style="flex:0 0 200px;font-size:13px;color:#1c2b36;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(i.label)}</div>
+        <div style="flex:1;background:#f4f6f8;border-radius:4px;height:20px;overflow:hidden;">
+          <div style="height:100%;width:${Math.max((i.valeur / max) * 100, 3)}%;background:${i.couleur};border-radius:4px;"></div>
+        </div>
+        <div style="flex:0 0 70px;text-align:right;font-size:13px;font-variant-numeric:tabular-nums;color:#55636c;">${esc(String(i.valeur))}${unite === 'h' ? ' h' : ''}</div>
+      </div>`).join('')}
+  </div>`;
 }

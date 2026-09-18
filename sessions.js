@@ -500,7 +500,9 @@ function lireLignesClientSession() {
 
 async function ouvrirSession(id) {
   S.ongletActif = 'sessions';
-  rendreOnglets();
+  S.categorieActive = (typeof categorieDeLOnglet === 'function' && categorieDeLOnglet('sessions')?.id) || S.categorieActive;
+  rendreMenuLateral();
+  rendreSousOnglets();
   const vue = $('#vue');
   vue.innerHTML = '<div class="carte">Chargement…</div>';
 

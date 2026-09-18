@@ -293,27 +293,30 @@ async function chargerStatsFormateur(formateurId) {
     </div>`;
 }
 
-// Tableau "1 ligne par année", détail par formation trié par nombre de
-// sessions décroissant (ex. "2024 : MAC SST (7), SST (6)") — trop de
-// formations distinctes pour des barres empilées lisibles, un tableau
-// reste clair même avec beaucoup de types différents.
+// Un bloc par année (année + total en en-tête), une ligne par formation en
+// dessous (libellé à gauche, nombre de sessions à droite, triées
+// décroissant) — un mur de texte séparé par des virgules devenait illisible
+// dès qu'une année comptait beaucoup de formations différentes.
 function foTableauAnneeFormation(annees, parAnneeFormation) {
   const anneesAvecDonnees = annees.filter(a => Object.keys(parAnneeFormation[a] || {}).length).sort((a, b) => b.localeCompare(a));
   if (!anneesAvecDonnees.length) return '<p style="color:#55636c;font-size:13px;">Aucune donnée.</p>';
-  return `<table style="width:100%;border-collapse:collapse;font-size:13px;">
-    <tbody>${anneesAvecDonnees.map(annee => {
+  return `<div style="display:flex;flex-direction:column;gap:18px;">
+    ${anneesAvecDonnees.map(annee => {
       const total = Object.values(parAnneeFormation[annee]).reduce((a, b) => a + b, 0);
-      const detail = Object.entries(parAnneeFormation[annee])
-        .sort((a, b) => b[1] - a[1])
-        .map(([formation, n]) => `${esc(formation)} (${n})`)
-        .join(', ');
-      return `<tr style="border-top:1px solid #eee;">
-        <td style="padding:6px 8px;font-weight:600;white-space:nowrap;vertical-align:top;">${esc(annee)} <span style="font-weight:400;color:#55636c;">(${total})</span></td>
-        <td style="padding:6px 8px;color:#1c2b36;">${detail}</td>
-      </tr>`;
+      const lignes = Object.entries(parAnneeFormation[annee]).sort((a, b) => b[1] - a[1]);
+      return `<div>
+        <div style="font-size:14px;font-weight:600;color:#1c2b36;margin-bottom:6px;">${esc(annee)} <span style="font-weight:400;color:#55636c;">— ${total} session${total > 1 ? 's' : ''}</span></div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <tbody>${lignes.map(([formation, n]) => `
+            <tr style="border-top:1px solid #eee;">
+              <td style="padding:5px 8px;color:#1c2b36;">${esc(formation)}</td>
+              <td style="padding:5px 8px;text-align:right;color:#55636c;font-variant-numeric:tabular-nums;white-space:nowrap;">${n} session${n > 1 ? 's' : ''}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>`;
     }).join('')}
-    </tbody>
-  </table>`;
+  </div>`;
 }
 
 function foStatTuile(libelle, valeur) {

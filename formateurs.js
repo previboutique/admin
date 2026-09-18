@@ -225,13 +225,16 @@ async function chargerStatsFormateur(formateurId) {
   const annees = [...new Set(sessions.map(s => s.date_debut.slice(0, 4)))].sort();
   const parAnnee = {};
   const parAnneeFamille = {};
-  annees.forEach(a => { parAnnee[a] = 0; parAnneeFamille[a] = {}; });
+  const parAnneeFormation = {};
+  annees.forEach(a => { parAnnee[a] = 0; parAnneeFamille[a] = {}; parAnneeFormation[a] = {}; });
   sessions.forEach(s => {
     const annee = s.date_debut.slice(0, 4);
     parAnnee[annee] += 1;
     const catBrute = s.formations_catalogue?.categorie || 'Non catégorisé';
     const cat = famillesTop.includes(catBrute) ? catBrute : 'Autres';
     parAnneeFamille[annee][cat] = (parAnneeFamille[annee][cat] || 0) + 1;
+    const formation = s.formations_catalogue?.denomination || 'Formation inconnue';
+    parAnneeFormation[annee][formation] = (parAnneeFormation[annee][formation] || 0) + 1;
   });
   const sessionsParAnnee = annees.map(a => ({ label: a, valeur: parAnnee[a], couleur: FO_COULEURS[0] }));
 
@@ -269,6 +272,10 @@ async function chargerStatsFormateur(formateurId) {
       ${foBarresVerticalesEmpilees(annees, parAnneeFamille, legendeFamilles)}
     </div>
     <div class="carte">
+      <h3 style="margin-top:0;">Nombre de sessions par année et par formation</h3>
+      ${foTableauAnneeFormation(annees, parAnneeFormation)}
+    </div>
+    <div class="carte">
       <h3 style="margin-top:0;">Sessions (${totalSessions})</h3>
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
         <tbody>${sessions.map(s => `
@@ -284,6 +291,29 @@ async function chargerStatsFormateur(formateurId) {
         </tbody>
       </table>
     </div>`;
+}
+
+// Tableau "1 ligne par année", détail par formation trié par nombre de
+// sessions décroissant (ex. "2024 : MAC SST (7), SST (6)") — trop de
+// formations distinctes pour des barres empilées lisibles, un tableau
+// reste clair même avec beaucoup de types différents.
+function foTableauAnneeFormation(annees, parAnneeFormation) {
+  const anneesAvecDonnees = annees.filter(a => Object.keys(parAnneeFormation[a] || {}).length).sort((a, b) => b.localeCompare(a));
+  if (!anneesAvecDonnees.length) return '<p style="color:#55636c;font-size:13px;">Aucune donnée.</p>';
+  return `<table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <tbody>${anneesAvecDonnees.map(annee => {
+      const total = Object.values(parAnneeFormation[annee]).reduce((a, b) => a + b, 0);
+      const detail = Object.entries(parAnneeFormation[annee])
+        .sort((a, b) => b[1] - a[1])
+        .map(([formation, n]) => `${esc(formation)} (${n})`)
+        .join(', ');
+      return `<tr style="border-top:1px solid #eee;">
+        <td style="padding:6px 8px;font-weight:600;white-space:nowrap;vertical-align:top;">${esc(annee)} <span style="font-weight:400;color:#55636c;">(${total})</span></td>
+        <td style="padding:6px 8px;color:#1c2b36;">${detail}</td>
+      </tr>`;
+    }).join('')}
+    </tbody>
+  </table>`;
 }
 
 function foStatTuile(libelle, valeur) {

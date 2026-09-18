@@ -210,33 +210,61 @@ function rendreZoneSuppressionGroupee() {
     <div id="suppression-groupee-zone"></div>`;
 }
 
+function sessionsSansFormateurDansPlage() {
+  const debut = $('#bulk-formateur-date-debut')?.value || '';
+  const fin = $('#bulk-formateur-date-fin')?.value || '';
+  return (window.__sessionsToutes || []).filter(s => {
+    if (s.formateur_id) return false;
+    if (debut && s.date_debut < debut) return false;
+    if (fin && s.date_debut > fin) return false;
+    return true;
+  });
+}
+
 function rendreZoneAssignationFormateurGroupee() {
   const zone = $('#bulk-formateur-zone');
   if (!zone) return;
   if (!PEUT_GERER_SESSIONS()) { zone.innerHTML = ''; return; }
 
-  const cibles = (window.__sessionsToutes || []).filter(s => !s.formateur_id);
+  const toutesSansFormateur = (window.__sessionsToutes || []).filter(s => !s.formateur_id);
   const formateurs = window.__sessionsFormateursDisponibles || [];
-  if (cibles.length === 0 || formateurs.length === 0) { zone.innerHTML = ''; return; }
+  if (toutesSansFormateur.length === 0 || formateurs.length === 0) { zone.innerHTML = ''; return; }
 
   zone.innerHTML = `
     <div style="margin-top:10px;padding-top:10px;border-top:1px solid #eee;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
       <div>
-        <label for="bulk-formateur-select">Assigner un formateur aux ${cibles.length} session(s) sans formateur</label>
+        <label for="bulk-formateur-select">Assigner un formateur aux sessions sans formateur</label>
         <select id="bulk-formateur-select" style="min-width:220px;">
           ${formateurs.map(f => `<option value="${f.id}">${esc(f.prenom + ' ' + f.nom)}${f.formateur_externe ? ' (externe)' : ''}</option>`).join('')}
         </select>
       </div>
+      <div>
+        <label for="bulk-formateur-date-debut">Du</label>
+        <input id="bulk-formateur-date-debut" type="date" onchange="rafraichirCompteFormateurGroupe()">
+      </div>
+      <div>
+        <label for="bulk-formateur-date-fin">Au</label>
+        <input id="bulk-formateur-date-fin" type="date" onchange="rafraichirCompteFormateurGroupe()">
+      </div>
       <button class="bouton" onclick="assignerFormateurGroupe()">Assigner</button>
     </div>
-    <p style="font-size:12px;color:#55636c;margin:6px 0 0;">Pratique pour rattraper les sessions importées sans formateur renseigné — vérifie ensuite au cas par cas si plusieurs formateurs étaient réellement concernés.</p>`;
+    <p style="font-size:12px;color:#55636c;margin:6px 0 0;">
+      <span id="bulk-formateur-compte">${toutesSansFormateur.length} session(s) sans formateur</span> —
+      laisse les dates vides pour prendre toutes les sessions sans formateur, ou précise une période pour ne cibler que celles-là.
+      Vérifie ensuite au cas par cas si plusieurs formateurs étaient réellement concernés.
+    </p>`;
+}
+
+function rafraichirCompteFormateurGroupe() {
+  const compte = $('#bulk-formateur-compte');
+  if (compte) compte.textContent = `${sessionsSansFormateurDansPlage().length} session(s) sans formateur dans cette période`;
 }
 
 async function assignerFormateurGroupe() {
   const formateurId = $('#bulk-formateur-select')?.value;
   if (!formateurId) return;
-  const cibles = (window.__sessionsToutes || []).filter(s => !s.formateur_id);
-  if (cibles.length === 0) return;
+  const cibles = sessionsSansFormateurDansPlage();
+  if (cibles.length === 0) { toast('Aucune session sans formateur sur cette période.', 'erreur'); return; }
   if (!confirm(`Assigner ce formateur à ${cibles.length} session(s) sans formateur ?`)) return;
 
   const ids = cibles.map(s => s.id);

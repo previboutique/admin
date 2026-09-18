@@ -225,6 +225,7 @@ function rendreZoneAssignationFormateurGroupee() {
   const zone = $('#bulk-formateur-zone');
   if (!zone) return;
   if (!PEUT_GERER_SESSIONS()) { zone.innerHTML = ''; return; }
+  if (S.organisation && S.organisation.assignation_rapide_formateur_active === false) { zone.innerHTML = ''; return; }
 
   const toutesSansFormateur = (window.__sessionsToutes || []).filter(s => !s.formateur_id);
   const formateurs = window.__sessionsFormateursDisponibles || [];
@@ -234,6 +235,9 @@ function rendreZoneAssignationFormateurGroupee() {
     <div style="margin-top:10px;padding-top:10px;border-top:1px solid #eee;">
       <p style="font-size:13px;font-weight:600;margin:0 0 6px;">
         Assigner un formateur à <span id="bulk-formateur-compte">${toutesSansFormateur.length}</span> session(s) sans formateur
+      </p>
+      <p style="font-size:12px;color:#55636c;margin:0 0 8px;">
+        Ce nombre porte sur toutes tes sessions sans formateur — il ne tient pas compte des filtres de recherche/statut/dates au-dessus (indépendant, par exemple, de "Sans stagiaire uniquement"). Seules les dates "Du"/"Au" ci-dessous le restreignent.
       </p>
       <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
         <div>
@@ -254,7 +258,7 @@ function rendreZoneAssignationFormateurGroupee() {
       </div>
       <p style="font-size:12px;color:#55636c;margin:6px 0 0;">
         Laisse les dates vides pour prendre toutes les sessions sans formateur, ou précise une période (date de début de session) pour ne cibler que celles-là.
-        Vérifie ensuite au cas par cas si plusieurs formateurs étaient réellement concernés.
+        Vérifie ensuite au cas par cas si plusieurs formateurs étaient réellement concernés. Désactivable dans l'onglet Organisme → Outils.
       </p>
     </div>`;
 }

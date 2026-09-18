@@ -71,6 +71,17 @@ async function ecranOrganisation(vue) {
     </div>
 
     <div class="carte" style="max-width:640px;">
+      <h3 style="margin-top:0;">Outils</h3>
+      <label style="display:flex;align-items:center;gap:8px;">
+        <input type="checkbox" id="og-assignation-rapide" style="width:auto;" ${org.assignation_rapide_formateur_active !== false ? 'checked' : ''}>
+        <span>Afficher l'assignation rapide de formateur sur l'écran Sessions</span>
+      </label>
+      <p style="font-size:12px;color:#55636c;margin:6px 0 0;">Barre qui permet d'assigner un formateur en une fois à toutes les sessions qui n'en ont pas (avec filtre de dates optionnel) — utile pour rattraper un import, à désactiver une fois le rattrapage terminé.</p>
+      <button class="bouton" style="margin-top:12px;" id="og-valider-outils">Enregistrer</button>
+      <div class="erreur" id="og-erreur-outils"></div>
+    </div>
+
+    <div class="carte" style="max-width:640px;">
       <h3 style="margin-top:0;">Envoi d'email (SMTP)</h3>
       <p style="font-size:12px;color:#55636c;margin:0 0 10px;">Utilisé pour l'envoi des documents au client depuis le détail d'une session.</p>
       <div style="display:flex;gap:10px;">
@@ -121,6 +132,10 @@ async function ecranOrganisation(vue) {
     exercice_jour_debut: Number($('#og-exjour').value) || 1,
     exercice_mois_debut: Number($('#og-exmois').value) || 1,
   }, 'og-erreur-exercice');
+
+  $('#og-valider-outils').onclick = () => enregistrerOrganisation({
+    assignation_rapide_formateur_active: $('#og-assignation-rapide').checked,
+  }, 'og-erreur-outils');
 
   $('#og-valider-smtp').onclick = () => enregistrerOrganisation({
     smtp_host: $('#og-smtp-host').value.trim() || null,

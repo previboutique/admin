@@ -111,6 +111,7 @@ async function ecranSessions(vue) {
         </div>
       </div>
       <p style="font-size:12px;color:#55636c;margin:8px 0 0;">"Sans stagiaire uniquement" aide à repérer les sessions vides créées par erreur (ex. doublons d'un import) — ouvre la session puis utilise "Supprimer" pour la retirer.</p>
+      <div id="bulk-suppression-zone"></div>
     </div>
     <div class="carte"><div id="liste-sessions">Chargement…</div></div>`;
 
@@ -166,6 +167,8 @@ function filtrerEtAfficherSessions() {
     return true;
   });
 
+  rendreZoneSuppressionGroupee();
+
   if (data.length === 0) { zone.innerHTML = '<p style="color:#55636c;">Aucune session ne correspond à ces critères.</p>'; return; }
 
   zone.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:14px;">
@@ -183,6 +186,53 @@ function filtrerEtAfficherSessions() {
         <td style="padding:6px 8px;">${esc(s.statut)}</td>
       </tr>`).join('')}
     </tbody></table>`;
+}
+
+function rendreZoneSuppressionGroupee() {
+  const zone = $('#bulk-suppression-zone');
+  if (!zone) return;
+  if (!PEUT_GERER_SESSIONS()) { zone.innerHTML = ''; return; }
+
+  const cibles = (window.__sessionsToutes || []).filter(s => s.statut === 'terminee' && s.__nbStagiaires === 0);
+  if (cibles.length === 0) { zone.innerHTML = ''; return; }
+
+  zone.innerHTML = `
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid #eee;">
+      <button class="bouton" style="background:#fdeeee;color:#b3261e;" onclick="ouvrirConfirmationSuppressionGroupee()">
+        Supprimer les ${cibles.length} session(s) terminée(s) sans stagiaire
+      </button>
+    </div>
+    <div id="suppression-groupee-zone"></div>`;
+}
+
+function ouvrirConfirmationSuppressionGroupee() {
+  const cibles = (window.__sessionsToutes || []).filter(s => s.statut === 'terminee' && s.__nbStagiaires === 0);
+  const zone = $('#suppression-groupee-zone');
+  zone.innerHTML = `
+    <div class="carte" style="border-color:#b3261e;background:#fdeeee;margin-top:10px;">
+      <h3 style="margin-top:0;color:#b3261e;">Supprimer ${cibles.length} session(s) terminée(s) sans stagiaire</h3>
+      <p style="font-size:13px;">Cette action supprime définitivement ces sessions (${cibles.map(s => esc(s.numero_session || '—')).join(', ')}) et les documents associés enregistrés. Utile pour retirer les doublons créés par un import raté.</p>
+      <label for="supp-groupee-texte">Pour confirmer, tape <strong>SUPPRESSION</strong> en toutes lettres ci-dessous :</label>
+      <input id="supp-groupee-texte" placeholder="SUPPRESSION">
+      <button class="bouton" id="supp-groupee-valider" style="margin-top:10px;background:#b3261e;" disabled>Confirmer la suppression</button>
+      <button class="bouton" style="margin-top:10px;margin-left:8px;background:#eee;color:#333;" onclick="$('#suppression-groupee-zone').innerHTML=''">Annuler</button>
+      <div class="erreur" id="supp-groupee-erreur"></div>
+    </div>`;
+
+  const champ = $('#supp-groupee-texte');
+  const bouton = $('#supp-groupee-valider');
+  champ.oninput = () => { bouton.disabled = champ.value.trim() !== 'SUPPRESSION'; };
+
+  bouton.onclick = async () => {
+    if (champ.value.trim() !== 'SUPPRESSION') return;
+    bouton.disabled = true;
+    bouton.textContent = 'Suppression…';
+    const ids = cibles.map(s => s.id);
+    const { error } = await supa.from('sessions_formation').delete().in('id', ids);
+    if (error) { DEBUG.erreur('supprimerSessionsGroupe', error); $('#supp-groupee-erreur').textContent = 'Erreur : ' + error.message; bouton.disabled = false; bouton.textContent = 'Confirmer la suppression'; return; }
+    toast(`${cibles.length} session(s) supprimée(s).`);
+    ecranSessions($('#vue'));
+  };
 }
 
 // ============================================================================
@@ -398,8 +448,8 @@ async function ouvrirSession(id) {
       </div>
       <div style="text-align:right;">
         <button class="bouton" style="background:#eee;color:#333;" onclick="allerA('sessions')">← Retour</button>
-        ${PEUT_GERER_SESSIONS() && session.statut !== 'terminee' ? `
-        <button class="bouton" style="background:#fdeeee;color:#b3261e;margin-left:8px;" onclick="ouvrirConfirmationSuppression('${session.id}')">Supprimer</button>` : ''}
+        ${PEUT_GERER_SESSIONS() && (session.statut !== 'terminee' || (participants || []).length === 0) ? `
+        <button class="bouton" style="background:#fdeeee;color:#b3261e;margin-left:8px;" onclick="ouvrirConfirmationSuppression('${session.id}', ${(participants || []).length})">Supprimer</button>` : ''}
       </div>
     </div>
 
@@ -589,12 +639,12 @@ async function enregistrerFinancementSession(sessionId) {
   }
 }
 
-function ouvrirConfirmationSuppression(sessionId) {
+function ouvrirConfirmationSuppression(sessionId, nbStagiaires) {
   const zone = $('#suppression-zone');
   zone.innerHTML = `
     <div class="carte" style="border-color:#b3261e;background:#fdeeee;">
       <h3 style="margin-top:0;color:#b3261e;">Supprimer cette session</h3>
-      <p style="font-size:13px;">Cette action supprime définitivement la session, ses inscriptions et les documents associés enregistrés. Elle ne concerne qu'une session non clôturée (statut différent de "terminée").</p>
+      <p style="font-size:13px;">Cette action supprime définitivement la session, ses inscriptions et les documents associés enregistrés.${nbStagiaires > 0 ? '' : ' Cette session ne compte aucun stagiaire — c\'est sans risque, notamment pour retirer un doublon créé par erreur lors d\'un import.'}</p>
       <label for="supp-texte">Pour confirmer, tape <strong>SUPPRESSION</strong> en toutes lettres ci-dessous :</label>
       <input id="supp-texte" placeholder="SUPPRESSION">
       <button class="bouton" id="supp-valider" style="margin-top:10px;background:#b3261e;" disabled>Confirmer la suppression</button>

@@ -2,10 +2,12 @@
 // core.js — socle : connexion Supabase, authentification, état global S,
 // routage entre onglets.
 
-// Clé publique par conception : c'est la Row Level Security côté base qui
-// protège les données, pas le secret de cette clé.
-const SUPABASE_URL = 'https://kzahahrnauynnrfznkje.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_VpOYj7KajWRHJKyjPyLh_g_mgabFpgZ';
+// ⚠️ À COMPLÉTER : remplacer par l'URL et la clé publique ("anon") de ton
+// projet Supabase (Supabase → Project Settings → API). La clé "anon" est
+// publique par conception : c'est la Row Level Security côté base qui protège
+// les données, pas le secret de cette clé.
+const SUPABASE_URL = 'https://TON-PROJET.supabase.co';
+const SUPABASE_ANON_KEY = 'TA-CLE-ANON-PUBLIQUE';
 
 const supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
@@ -55,6 +57,44 @@ async function chargerProfil() {
   if (errOrg) { DEBUG.erreur('chargerOrganisation', errOrg); return; }
   S.organisation = org;
   $('#titre-organisation').textContent = org.raison_sociale || 'Admin Formation';
+  await chargerImagesIdentite();
+  appliquerIdentiteVisuelle();
+}
+
+// Précharge logo/signature/tampon en base64 (data URL) sur S.organisation,
+// pour un usage synchrone dans pdf.js (évite de rendre chaque générateur de
+// PDF asynchrone juste pour aller chercher une image sur le réseau).
+async function chargerImagesIdentite() {
+  const champs = { logo_url: '_logoDataUrl', signature_url: '_signatureDataUrl', tampon_url: '_tamponDataUrl' };
+  await Promise.all(Object.entries(champs).map(async ([champUrl, champCache]) => {
+    const url = S.organisation?.[champUrl];
+    if (!url) { S.organisation[champCache] = null; return; }
+    try {
+      const reponse = await fetch(url);
+      const blob = await reponse.blob();
+      S.organisation[champCache] = await new Promise((resolve, reject) => {
+        const lecteur = new FileReader();
+        lecteur.onload = () => resolve(lecteur.result);
+        lecteur.onerror = reject;
+        lecteur.readAsDataURL(blob);
+      });
+    } catch (e) {
+      DEBUG.erreur('chargerImagesIdentite', e);
+      S.organisation[champCache] = null;
+    }
+  }));
+}
+
+// Affiche le logo de l'organisme dans l'en-tête de l'appli, s'il existe.
+function appliquerIdentiteVisuelle() {
+  const zone = $('#logo-organisation');
+  if (!zone) return;
+  if (S.organisation?.logo_url) {
+    zone.src = S.organisation.logo_url;
+    zone.style.display = 'inline-block';
+  } else {
+    zone.style.display = 'none';
+  }
 }
 
 function rendreOnglets() {

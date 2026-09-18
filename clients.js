@@ -3,19 +3,40 @@
 // AT/MP/jours ITT par année, reprises de l'onglet "Renseignement" du classeur
 // Excel d'origine).
 
-async function ecranClients(vue) {
+// typeFiltre : null (tous, écran "Clients") ou 'organisme_formation'
+// (écran "Organismes sous-traitants" — voir ecranSousTraitants ci-dessous).
+async function ecranClients(vue, typeFiltre) {
+  window.__clientsTypeFiltre = typeFiltre || null;
+  const estSousTraitants = typeFiltre === 'organisme_formation';
+
   vue.innerHTML = `
-    <div class="carte" style="display:flex;justify-content:space-between;align-items:center;">
-      <h2 style="margin:0;">Clients</h2>
-      <button class="bouton" onclick="ouvrirFicheClient(null)">+ Nouveau client</button>
+    <div class="carte" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+      <h2 style="margin:0;">${estSousTraitants ? 'Organismes sous-traitants' : 'Clients'}</h2>
+      <div>
+        ${!estSousTraitants ? `
+        <button class="bouton" style="background:#eee;color:#333;" onclick="exporterClientsExcel()">Exporter (Excel)</button>
+        <button class="bouton" style="background:#eee;color:#333;margin-left:6px;" onclick="$('#cl-import-fichier').click()">Importer les mises à jour (Excel)</button>
+        <input type="file" id="cl-import-fichier" accept=".xlsx,.xls" style="display:none;">` : ''}
+        <button class="bouton" style="margin-left:6px;" onclick="ouvrirFicheClient(null)">+ Nouveau ${estSousTraitants ? 'organisme' : 'client'}</button>
+      </div>
     </div>
+    ${estSousTraitants ? `
+    <p style="font-size:12px;color:#55636c;margin:-6px 0 0;">
+      Un organisme sous-traitant est un autre organisme de formation qui confie des sessions à réaliser (sous-traitance reçue — cadre G du BPF). Les sessions pour ces organismes se créent normalement dans l'onglet Sessions, avec cet organisme comme client.
+    </p>` : `
+    <p style="font-size:12px;color:#55636c;margin:-6px 0 0;">
+      "Exporter" télécharge la fiche de tous les clients (utile après un import de sessions qui n'a créé que la raison sociale, pour compléter adresse/SIRET/etc. dans le fichier). "Importer les mises à jour" relit ce même fichier une fois complété : seules les cases remplies mettent à jour la fiche existante, une case vide ne remplace jamais une valeur déjà en base.
+    </p>`}
+    <div id="cl-import-resultat"></div>
     <div class="carte">
-      <input id="cl-recherche" placeholder="Rechercher un client…" style="margin-bottom:10px;">
+      <input id="cl-recherche" placeholder="Rechercher ${estSousTraitants ? 'un organisme' : 'un client'}…" style="margin-bottom:10px;">
       <div id="clients-liste">Chargement…</div>
     </div>
     <div id="client-fiche"></div>`;
 
-  const { data, error } = await supa.from('clients').select('id, raison_sociale, ville, actif').order('raison_sociale');
+  let requete = supa.from('clients').select('id, raison_sociale, ville, actif, type_client').order('raison_sociale');
+  if (typeFiltre) requete = requete.eq('type_client', typeFiltre);
+  const { data, error } = await requete;
   if (error) { DEBUG.erreur('ecranClients', error); $('#clients-liste').textContent = 'Erreur de chargement.'; return; }
   window.__clientsCourant = data || [];
   rendreListeClients(window.__clientsCourant);
@@ -24,6 +45,133 @@ async function ecranClients(vue) {
     const t = e.target.value.trim().toLowerCase();
     rendreListeClients(window.__clientsCourant.filter(c => c.raison_sociale.toLowerCase().includes(t)));
   };
+
+  const inputImport = $('#cl-import-fichier');
+  if (inputImport) {
+    inputImport.onchange = async (e) => {
+      const fichier = e.target.files[0];
+      e.target.value = '';
+      if (!fichier) return;
+      await importerMiseAJourClients(fichier);
+    };
+  }
+}
+
+// Filtre dédié pour l'onglet "Organismes sous-traitants" (clients.type_client
+// = 'organisme_formation') — voir patch_2026-09-18a.
+function ecranSousTraitants(vue) {
+  return ecranClients(vue, 'organisme_formation');
+}
+
+// ---------------------------------------------------------------------------
+// Export / import de la fiche client (compléter en masse adresse, SIRET,
+// code APE… notamment après un import de sessions qui ne crée le client
+// qu'avec sa raison sociale).
+// ---------------------------------------------------------------------------
+const COLONNES_EXPORT_CLIENTS = ['Raison sociale', 'SIRET', 'Code APE', 'Adresse', 'Code postal', 'Ville', "Secteur d'activité", 'Notes', 'Actif', 'Champs manquants'];
+
+async function exporterClientsExcel() {
+  const { data: clients, error } = await supa.from('clients').select('*').order('raison_sociale');
+  if (error) { DEBUG.erreur('exporterClientsExcel', error); toast('Erreur : ' + error.message, 'erreur'); return; }
+
+  const lignes = (clients || []).map(c => {
+    const manquants = [];
+    if (!c.siret) manquants.push('SIRET');
+    if (!c.code_ape) manquants.push('Code APE');
+    if (!c.adresse) manquants.push('Adresse');
+    if (!c.code_postal) manquants.push('Code postal');
+    if (!c.ville) manquants.push('Ville');
+    if (!c.secteur_activite) manquants.push("Secteur d'activité");
+    return [
+      c.raison_sociale, c.siret || '', c.code_ape || '', c.adresse || '',
+      c.code_postal || '', c.ville || '', c.secteur_activite || '', c.notes || '',
+      c.actif ? 'oui' : 'non', manquants.join(', '),
+    ];
+  });
+
+  const feuille = XLSX.utils.aoa_to_sheet([COLONNES_EXPORT_CLIENTS, ...lignes]);
+  feuille['!cols'] = [{ wch: 28 }, { wch: 16 }, { wch: 10 }, { wch: 30 }, { wch: 10 }, { wch: 18 }, { wch: 20 }, { wch: 24 }, { wch: 6 }, { wch: 30 }];
+  const classeur = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(classeur, feuille, 'Clients');
+  XLSX.writeFile(classeur, `Clients - fiches a completer - ${new Date().toISOString().slice(0, 10)}.xlsx`);
+  toast(`${lignes.length} client(s) exporté(s).`);
+}
+
+async function importerMiseAJourClients(fichier) {
+  const zone = $('#cl-import-resultat');
+  zone.innerHTML = '<div class="carte">Analyse…</div>';
+
+  let lignesBrutes;
+  try {
+    const buffer = await fichier.arrayBuffer();
+    const classeur = XLSX.read(buffer, { type: 'array' });
+    const feuille = classeur.Sheets['Clients'] || classeur.Sheets[classeur.SheetNames[0]];
+    lignesBrutes = XLSX.utils.sheet_to_json(feuille, { header: 1, defval: null });
+  } catch (err) {
+    DEBUG.erreur('lectureImportClients', err);
+    zone.innerHTML = `<div class="carte"><p class="erreur">Erreur de lecture du fichier : ${esc(err.message)}</p></div>`;
+    return;
+  }
+
+  if (!lignesBrutes || lignesBrutes.length < 2) { zone.innerHTML = '<div class="carte"><p class="erreur">Fichier vide ou illisible.</p></div>'; return; }
+
+  const entetes = lignesBrutes[0].map(normaliserEntete);
+  const colonnes = {
+    raison_sociale: entetes.findIndex(h => h.startsWith('raison sociale')),
+    siret: entetes.findIndex(h => h.startsWith('siret')),
+    code_ape: entetes.findIndex(h => h.startsWith('code ape')),
+    adresse: entetes.findIndex(h => h.startsWith('adresse')),
+    code_postal: entetes.findIndex(h => h.startsWith('code postal')),
+    ville: entetes.findIndex(h => h.startsWith('ville')),
+    secteur_activite: entetes.findIndex(h => h.startsWith('secteur')),
+    notes: entetes.findIndex(h => h.startsWith('notes')),
+  };
+  if (colonnes.raison_sociale === -1) {
+    zone.innerHTML = '<div class="carte"><p class="erreur">Colonne "Raison sociale" introuvable — utilise le fichier généré par "Exporter (Excel)".</p></div>';
+    return;
+  }
+
+  const { data: clientsExistants } = await supa.from('clients').select('id, raison_sociale');
+  const index = {};
+  (clientsExistants || []).forEach(c => { index[c.raison_sociale.trim().toLowerCase()] = c.id; });
+
+  let misAJour = 0, inchanges = 0;
+  const introuvables = [];
+  const echecs = [];
+
+  for (let r = 1; r < lignesBrutes.length; r++) {
+    const row = lignesBrutes[r];
+    if (!row || row.every(v => v === null || v === '')) continue;
+    const val = (cle) => colonnes[cle] !== -1 && colonnes[cle] != null ? row[colonnes[cle]] : null;
+    const raisonSociale = String(val('raison_sociale') || '').trim();
+    if (!raisonSociale) continue;
+
+    const clientId = index[raisonSociale.toLowerCase()];
+    if (!clientId) { introuvables.push(raisonSociale); continue; }
+
+    // Ne met à jour que les cases remplies : une case vide dans le fichier
+    // ne doit jamais effacer une valeur déjà enregistrée.
+    const payload = {};
+    ['siret', 'code_ape', 'adresse', 'code_postal', 'ville', 'secteur_activite', 'notes'].forEach(cle => {
+      const v = val(cle);
+      if (v !== null && String(v).trim() !== '') payload[cle] = String(v).trim();
+    });
+
+    if (!Object.keys(payload).length) { inchanges++; continue; }
+
+    const { error } = await supa.from('clients').update(payload).eq('id', clientId);
+    if (error) { echecs.push(`${raisonSociale} : ${error.message}`); continue; }
+    misAJour++;
+  }
+
+  zone.innerHTML = `
+    <div class="carte">
+      <p style="color:#0a5c8a;font-weight:600;">${misAJour} client(s) mis à jour${inchanges ? `, ${inchanges} sans changement (rien de nouveau dans le fichier)` : ''}.</p>
+      ${introuvables.length ? `<p class="erreur">${introuvables.length} raison(s) sociale(s) introuvable(s) en base (vérifie l'orthographe exacte) : ${introuvables.map(esc).join(', ')}</p>` : ''}
+      ${echecs.length ? `<p class="erreur">${echecs.length} échec(s) : ${echecs.map(esc).join(' ; ')}</p>` : ''}
+    </div>`;
+  toast('Import des mises à jour clients terminé.');
+  ecranClients($('#vue'), window.__clientsTypeFiltre);
 }
 
 function rendreListeClients(liste) {
@@ -34,6 +182,7 @@ function rendreListeClients(liste) {
       <tr style="border-top:1px solid #eee;cursor:pointer;${c.actif ? '' : 'opacity:.5;'}" onclick="ouvrirFicheClient('${c.id}')">
         <td style="padding:6px 8px;">${esc(c.raison_sociale)}</td>
         <td style="padding:6px 8px;color:#55636c;">${esc(c.ville || '')}</td>
+        <td style="padding:6px 8px;color:#55636c;">${c.type_client === 'organisme_formation' ? 'Organisme de formation' : ''}</td>
         <td style="padding:6px 8px;">${c.actif ? '' : '<span style="color:#b3261e;">inactif</span>'}</td>
       </tr>`).join('')}
     </tbody></table>`;
@@ -59,6 +208,11 @@ async function ouvrirFicheClient(id) {
       <h3 style="margin-top:0;">${client ? 'Modifier' : 'Nouveau'} client</h3>
       <label for="ci-raison">Raison sociale</label>
       <input id="ci-raison" value="${client ? esc(client.raison_sociale) : ''}">
+      <label for="ci-type">Type</label>
+      <select id="ci-type">
+        <option value="entreprise" ${!client || client.type_client === 'entreprise' ? 'selected' : ''}>Entreprise cliente</option>
+        <option value="organisme_formation" ${client?.type_client === 'organisme_formation' || window.__clientsTypeFiltre === 'organisme_formation' ? 'selected' : ''}>Organisme de formation (sous-traitance)</option>
+      </select>
       <div style="display:flex;gap:10px;">
         <div style="flex:1;"><label for="ci-siret">SIRET</label><input id="ci-siret" value="${client ? esc(client.siret) : ''}"></div>
         <div style="flex:1;"><label for="ci-ape">Code APE</label><input id="ci-ape" value="${client ? esc(client.code_ape) : ''}"></div>
@@ -103,6 +257,7 @@ async function ouvrirFicheClient(id) {
     const payload = {
       organisation_id: S.organisation.id,
       raison_sociale: $('#ci-raison').value.trim(),
+      type_client: $('#ci-type').value,
       siret: $('#ci-siret').value.trim() || null,
       code_ape: $('#ci-ape').value.trim() || null,
       adresse: $('#ci-adresse').value.trim() || null,
@@ -118,8 +273,8 @@ async function ouvrirFicheClient(id) {
     const { data, error } = await req;
     if (error) { DEBUG.erreur('enregistrerClient', error); $('#ci-erreur').textContent = 'Erreur : ' + error.message; return; }
     toast('Client enregistré.');
-    if (!client) { ouvrirFicheClient(data.id); ecranClients($('#vue')); }
-    else { ecranClients($('#vue')); }
+    if (!client) { ouvrirFicheClient(data.id); ecranClients($('#vue'), window.__clientsTypeFiltre); }
+    else { ecranClients($('#vue'), window.__clientsTypeFiltre); }
   };
 }
 

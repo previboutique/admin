@@ -77,9 +77,43 @@ function telechargerOuOuvrir(doc, nomFichier, sansTelechargement) {
   return { doc, nomFichier };
 }
 
-function nomFichierDoc(prefixe, session, stagiaire) {
+// Logo de l'organisme, en haut à droite de chaque document (si téléversé
+// dans l'écran Organisme). N'échoue jamais silencieusement : une image
+// invalide est simplement ignorée.
+function ajouterLogoEnTete(doc) {
+  const logo = S.organisation?._logoDataUrl;
+  if (!logo) return;
+  try {
+    const proprietes = doc.getImageProperties(logo);
+    const largeurMax = 30, hauteurMax = 16;
+    let largeur = largeurMax, hauteur = (proprietes.height / proprietes.width) * largeur;
+    if (hauteur > hauteurMax) { hauteur = hauteurMax; largeur = (proprietes.width / proprietes.height) * hauteur; }
+    const largeurPage = doc.internal.pageSize.getWidth();
+    doc.addImage(logo, proprietes.fileType || 'PNG', largeurPage - MARGE - largeur, 8, largeur, hauteur);
+  } catch (e) { /* image illisible — on ignore, le document reste généré sans logo */ }
+}
+
+// Signature du représentant + tampon de l'organisme, insérés côte à côte à
+// la position (x, y) — utilisés sur les documents qui portent une signature
+// (Convention, Certificat de réalisation).
+function ajouterSignatureEtTampon(doc, x, y) {
+  const largeurMax = 35, hauteurMax = 20;
+  let decalage = 0;
+  [S.organisation?._signatureDataUrl, S.organisation?._tamponDataUrl].forEach(image => {
+    if (!image) return;
+    try {
+      const proprietes = doc.getImageProperties(image);
+      let largeur = largeurMax, hauteur = (proprietes.height / proprietes.width) * largeur;
+      if (hauteur > hauteurMax) { hauteur = hauteurMax; largeur = (proprietes.width / proprietes.height) * hauteur; }
+      doc.addImage(image, proprietes.fileType || 'PNG', x - largeur - decalage, y, largeur, hauteur);
+      decalage += largeur + 4;
+    } catch (e) { /* image illisible — ignorée */ }
+  });
+}
+
+function nomFichierDoc(prefixe, session, stagiaire, nomClient) {
   const date = session.date_debut;
-  const client = (session.clients?.raison_sociale || '').replace(/[^\w-]+/g, '');
+  const client = (nomClient || session.clients?.raison_sociale || '').replace(/[^\w-]+/g, '');
   const nom = stagiaire ? (stagiaire.prenom + ' ' + stagiaire.nom).replace(/[^\w-]+/g, '') : '';
   return `${date} - ${prefixe}${nom ? ' - ' + nom : ''}${client ? ' - ' + client : ''}.pdf`.replace(/\s+/g, ' ');
 }
@@ -89,6 +123,7 @@ function nomFichierDoc(prefixe, session, stagiaire) {
 // ============================================================================
 function genererConvocation(session, participant, sansTelechargement) {
   const doc = new jsPDF();
+  ajouterLogoEnTete(doc);
   const f = session.formations_catalogue;
   const st = participant.stagiaires;
   let y = 20;
@@ -138,6 +173,7 @@ function genererConvocation(session, participant, sansTelechargement) {
 // ============================================================================
 function genererAFF(session, participant, sansTelechargement) {
   const doc = new jsPDF();
+  ajouterLogoEnTete(doc);
   const f = session.formations_catalogue;
   const st = participant.stagiaires;
   const formateurNom = session.__formateurNom || S.organisation.representant_nom || S.profil.prenom + ' ' + S.profil.nom;
@@ -208,10 +244,20 @@ function genererAFF(session, participant, sansTelechargement) {
 // ============================================================================
 function genererCertificatRealisation(session, participant, sansTelechargement) {
   const doc = new jsPDF();
+  // Logo officiel du Ministère du Travail, en haut à gauche — modèle
+  // réglementaire du Certificat de réalisation (arrêté du 21 décembre 2018).
+  // Ne pas utiliser ce logo ailleurs (voir logo_gouvernement.js).
+  try {
+    const proprietesLogoGouv = doc.getImageProperties(LOGO_MINISTERE_TRAVAIL_BASE64);
+    const largeurLogoGouv = 28;
+    const hauteurLogoGouv = (proprietesLogoGouv.height / proprietesLogoGouv.width) * largeurLogoGouv;
+    doc.addImage(LOGO_MINISTERE_TRAVAIL_BASE64, 'PNG', MARGE, 10, largeurLogoGouv, hauteurLogoGouv);
+  } catch (e) { /* logo illisible — le document reste généré sans lui */ }
+  ajouterLogoEnTete(doc);
   const f = session.formations_catalogue;
   const st = participant.stagiaires;
-  const client = session.clients;
-  let y = 20;
+  const client = participant.clients || session.clients;
+  let y = 42;
 
   y = titre(doc, 'CERTIFICAT DE REALISATION', y);
   y += 5;
@@ -250,14 +296,16 @@ function genererCertificatRealisation(session, participant, sansTelechargement) 
   doc.text(`Fait à : ${S.organisation.ville || ''}`, MARGE, y);
   doc.text('Cachet et signature', 195, y, { align: 'right' }); y += 5;
   doc.text(`Le : ${formatDateLongue(new Date().toISOString().slice(0, 10))}`, MARGE, y);
-  doc.text('du responsable du dispensateur de formation', 195, y, { align: 'right' }); y += 15;
+  doc.text('du responsable du dispensateur de formation', 195, y, { align: 'right' });
+  ajouterSignatureEtTampon(doc, 195, y + 3);
+  y += 30;
 
   doc.setFont('helvetica', 'italic'); doc.setFontSize(7.5); doc.setTextColor(90, 90, 90);
   y = paragraphe(doc,
     "1 Lorsque l'action est mise en œuvre dans le cadre d'un projet de transition professionnelle, le certificat de " +
     'réalisation doit être transmis mensuellement.', y, { taille: 7.5 });
 
-  return telechargerOuOuvrir(doc, nomFichierDoc('Certificat de realisation', session, st), sansTelechargement);
+  return telechargerOuOuvrir(doc, nomFichierDoc('Certificat de realisation', session, st, client?.raison_sociale), sansTelechargement);
 }
 
 function client_ville_txt(client) {
@@ -265,12 +313,24 @@ function client_ville_txt(client) {
 }
 
 // ============================================================================
-// CONVENTION DE FORMATION PROFESSIONNELLE — un document par session
+// CONVENTION DE FORMATION PROFESSIONNELLE — un document PAR CLIENT de la
+// session (une session peut réunir plusieurs entreprises clientes, chacune
+// avec son propre tarif et sa propre Convention — voir session_clients).
+// clientEntry : ligne de session_clients ({ client_id, clients:{raison_
+// sociale, ville}, prix_unitaire, numero_devis }) pour laquelle générer la
+// Convention. Si absent (compatibilité), on retombe sur l'ancien modèle à
+// client unique (session.clients / session.prix_unitaire) et tous les
+// participants.
 // ============================================================================
-function genererConvention(session, participants, sansTelechargement) {
+function genererConvention(session, participants, sansTelechargement, clientEntry) {
   const doc = new jsPDF();
+  ajouterLogoEnTete(doc);
   const f = session.formations_catalogue;
-  const client = session.clients;
+  const client = clientEntry ? clientEntry.clients : session.clients;
+  const prixClient = clientEntry ? clientEntry.prix_unitaire : session.prix_unitaire;
+  const participantsClient = clientEntry
+    ? (participants || []).filter(p => p.client_id === clientEntry.client_id)
+    : (participants || []);
   let y = 18;
 
   y = titre(doc, 'CONVENTION DE FORMATION PROFESSIONNELLE', y);
@@ -315,7 +375,7 @@ function genererConvention(session, participants, sansTelechargement) {
 
   y = paragraphe(doc, 'Article 3 : Dispositions financières', y, { gras: true, apres: 2 });
   y = paragraphe(doc, `En contrepartie de cette action de formation, l'employeur s'acquittera des coûts suivants :`, y, { apres: 3 });
-  y = paragraphe(doc, `Coût total TTC : ${session.prix_unitaire != null ? session.prix_unitaire + ' €' : 'à préciser'} Net de taxe (TVA non applicable)`, y, { apres: 6 });
+  y = paragraphe(doc, `Coût total TTC : ${prixClient != null ? prixClient + ' €' : 'à préciser'} Net de taxe (TVA non applicable)`, y, { apres: 6 });
 
   y = paragraphe(doc, 'Article 4 : Modalités de règlement', y, { gras: true, apres: 2 });
   y = paragraphe(doc, 'Le paiement sera dû à réception de la facture.', y, { apres: 6 });
@@ -349,24 +409,26 @@ function genererConvention(session, participants, sansTelechargement) {
   doc.text("Pour l'organisme", 195, y, { align: 'right' }); y += 5;
   doc.setFontSize(8.5);
   doc.text('(nom et qualité du signataire)', MARGE, y);
-  doc.text('(nom et qualité du signataire)', 195, y, { align: 'right' }); y += 15;
+  doc.text('(nom et qualité du signataire)', 195, y, { align: 'right' });
+  ajouterSignatureEtTampon(doc, 195, y + 3);
+  y += 30;
   doc.setFontSize(10.5).setFont('helvetica', 'bold');
   doc.text(`${S.organisation.representant_nom || ''}${S.organisation.representant_qualite ? ', ' + S.organisation.representant_qualite : ''}`, 195, y, { align: 'right' });
 
-  // Annexe : liste des stagiaires
-  if (participants && participants.length) {
+  // Annexe : liste des stagiaires (uniquement ceux rattachés à ce client)
+  if (participantsClient.length) {
     doc.addPage();
     let yy = titre(doc, 'ANNEXE — LISTE DES STAGIAIRES', 20);
     doc.autoTable({
       startY: yy + 4,
       head: [['Nom', 'Prénom', 'Date de naissance']],
-      body: participants.map(p => [p.stagiaires?.nom || '', p.stagiaires?.prenom || '', p.stagiaires?.date_naissance ? formatDateLongue(p.stagiaires.date_naissance) : '']),
+      body: participantsClient.map(p => [p.stagiaires?.nom || '', p.stagiaires?.prenom || '', p.stagiaires?.date_naissance ? formatDateLongue(p.stagiaires.date_naissance) : '']),
       headStyles: { fillColor: [10, 92, 138] },
       styles: { fontSize: 10 },
     });
   }
 
-  return telechargerOuOuvrir(doc, nomFichierDoc('Convention', session, null), sansTelechargement);
+  return telechargerOuOuvrir(doc, nomFichierDoc('Convention', session, null, client?.raison_sociale), sansTelechargement);
 }
 
 // ============================================================================
@@ -376,19 +438,24 @@ function genererConvention(session, participants, sansTelechargement) {
 // ============================================================================
 function genererFeuillePresence(session, participants, sansTelechargement) {
   const doc = new jsPDF({ orientation: 'landscape' });
+  ajouterLogoEnTete(doc);
   const f = session.formations_catalogue;
   let y = 18;
+
+  // Chaque stagiaire affiche sa propre entreprise (une session peut réunir
+  // plusieurs clients) ; l'en-tête liste les entreprises distinctes.
+  const nomsClients = Array.from(new Set((participants || []).map(p => p.clients?.raison_sociale).filter(Boolean)));
 
   doc.setFont('helvetica', 'bold'); doc.setFontSize(13);
   doc.text("FEUILLE D'ÉMARGEMENT", 148, y, { align: 'center' }); y += 8;
   doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
-  doc.text(`${f?.denomination || ''} — ${formatPlageDatesLongue(session.date_debut, session.date_fin)} — ${session.lieu || ''}${session.clients ? ' — ' + session.clients.raison_sociale : ''}`, 148, y, { align: 'center' });
+  doc.text(`${f?.denomination || ''} — ${formatPlageDatesLongue(session.date_debut, session.date_fin)} — ${session.lieu || ''}${nomsClients.length ? ' — ' + nomsClients.join(', ') : ''}`, 148, y, { align: 'center' });
   y += 10;
 
   doc.autoTable({
     startY: y,
     head: [['Nom', 'Prénom', 'Entreprise', 'Signature matin', 'Signature après-midi']],
-    body: (participants || []).map(p => [p.stagiaires?.nom || '', p.stagiaires?.prenom || '', session.clients?.raison_sociale || '', '', '']),
+    body: (participants || []).map(p => [p.stagiaires?.nom || '', p.stagiaires?.prenom || '', p.clients?.raison_sociale || '', '', '']),
     styles: { fontSize: 11, cellPadding: 4, minCellHeight: 14 },
     headStyles: { fillColor: [10, 92, 138] },
   });
@@ -405,6 +472,7 @@ function genererFeuillePresence(session, participants, sansTelechargement) {
 // ============================================================================
 function genererDocumentBPF(exercice, donnees) {
   const doc = new jsPDF();
+  ajouterLogoEnTete(doc);
   let y = 18;
 
   y = titre(doc, 'RÉCAPITULATIF — BILAN PÉDAGOGIQUE ET FINANCIER', y);
@@ -424,6 +492,8 @@ function genererDocumentBPF(exercice, donnees) {
   });
   y = doc.lastAutoTable.finalY + 8;
 
+  y = paragraphe(doc, `B. Formation en tout ou partie à distance mise en œuvre sur l'exercice : ${donnees.formationADistance ? 'Oui' : 'Non'}`, y, { gras: true, apres: 6 });
+
   y = paragraphe(doc, 'C. Produits par origine de financement (hors taxes)', y, { gras: true, apres: 2 });
   doc.autoTable({
     startY: y,
@@ -432,6 +502,22 @@ function genererDocumentBPF(exercice, donnees) {
     foot: [['TOTAL', donnees.totalProduits.toFixed(2) + ' €']],
     styles: { fontSize: 9.5, cellPadding: 2 },
     headStyles: { fillColor: [10, 92, 138] },
+    footStyles: { fillColor: [230, 230, 230], textColor: [20, 20, 20], fontStyle: 'bold' },
+    columnStyles: { 1: { halign: 'right', cellWidth: 40 } },
+  });
+  y = doc.lastAutoTable.finalY + 6;
+
+  if (y > 230) { doc.addPage(); y = 20; }
+  y = paragraphe(doc, "D. Charges de l'organisme (hors taxes)", y, { gras: true, apres: 2 });
+  doc.autoTable({
+    startY: y,
+    body: [
+      ['Salaires des formateurs (internes)', donnees.salairesFormateurs.toFixed(2) + ' €'],
+      ['Achats de prestation de formation et honoraires (externes)', donnees.achatsPrestationFormation.toFixed(2) + ' €'],
+      ['Autres charges (saisies manuellement)', donnees.autresCharges.toFixed(2) + ' €'],
+    ],
+    foot: [['TOTAL DES CHARGES', donnees.totalCharges.toFixed(2) + ' €']],
+    styles: { fontSize: 9.5, cellPadding: 2 },
     footStyles: { fillColor: [230, 230, 230], textColor: [20, 20, 20], fontStyle: 'bold' },
     columnStyles: { 1: { halign: 'right', cellWidth: 40 } },
   });
@@ -494,8 +580,10 @@ function genererDocumentBPF(exercice, donnees) {
   doc.setFont('helvetica', 'italic'); doc.setFontSize(8); doc.setTextColor(90, 90, 90);
   y = paragraphe(doc,
     "Document généré automatiquement à partir des sessions enregistrées dans l'application. Il ne remplace pas la déclaration officielle du Bilan " +
-    "Pédagogique et Financier, à effectuer avant le 30 avril sur monactiviteformation.emploi.gouv.fr. Vérifier notamment le total des charges, la part " +
-    "du chiffre d'affaires réalisée en formation professionnelle, et les catégories approximées (type de stagiaire, spécialités) avant de reporter ces chiffres.",
+    "Pédagogique et Financier, à effectuer avant le 30 avril sur monactiviteformation.emploi.gouv.fr. Le cadre D (charges) est calculé à partir des " +
+    "heures et des taux horaires renseignés sur les formateurs, complété des \"autres charges\" saisies à la main — à vérifier. La part du chiffre " +
+    "d'affaires réalisée en formation professionnelle et les catégories approximées (type de stagiaire, spécialités) restent également à vérifier avant de reporter ces chiffres." +
+    (donnees.formateursSansTauxHoraire ? " Au moins un formateur n'a pas de taux horaire renseigné : son coût n'est pas inclus dans le cadre D ci-dessus." : ""),
     y, { taille: 8 });
 
   telechargerOuOuvrir(doc, `BPF - ${exercice.debut} au ${exercice.fin} - ${S.organisation.raison_sociale}.pdf`.replace(/[/\\?%*:|"<>]+/g, '').replace(/\s+/g, ' '));

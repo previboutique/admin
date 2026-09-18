@@ -46,7 +46,10 @@
 <body>
 
 <header class="app-header">
-  <h1 id="titre-organisation">Admin Formation</h1>
+  <div style="display:flex;align-items:center;gap:10px;">
+    <img id="logo-organisation" style="display:none;height:32px;max-width:120px;object-fit:contain;background:#fff;border-radius:4px;padding:2px;">
+    <h1 id="titre-organisation">Admin Formation</h1>
+  </div>
   <div id="zone-utilisateur"></div>
 </header>
 
@@ -66,6 +69,7 @@
      (il référence leurs fonctions dans DISPATCH_ONGLETS). -->
 <script src="debug.js"></script>
 <script src="core.js"></script>
+<script src="logo_gouvernement.js"></script>
 <script src="dashboard.js"></script>
 <script src="pdf.js"></script>
 <script src="sessions.js"></script>
@@ -74,6 +78,8 @@
 <script src="import_excel.js"></script>
 <script src="clients.js"></script>
 <script src="bpf.js"></script>
+<script src="formateurs.js"></script>
+<script src="organisation.js"></script>
 <script src="app.js"></script>
 
 <script>

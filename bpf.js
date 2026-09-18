@@ -71,11 +71,15 @@ async function chargerEtAfficherBPF() {
   const zone = $('#bpf-contenu');
   zone.innerHTML = 'Calcul en cours…';
 
-  const { data: sessions, error } = await supa
-    .from('sessions_formation')
-    .select('id, date_debut, date_fin, prix_unitaire, origine_financement, sous_traitance_recue, formateur_id, formations_catalogue(denomination, categorie, duree_heures), profils:formateur_id(nom, prenom, formateur_externe)')
-    .gte('date_debut', debut)
-    .lte('date_debut', fin);
+  const anneeExercice = Number(debut.slice(0, 4));
+
+  const [{ data: sessions, error }, { data: parametres }] = await Promise.all([
+    supa.from('sessions_formation')
+      .select('id, date_debut, date_fin, prix_unitaire, origine_financement, sous_traitance_recue, modalite, formateur_id, formations_catalogue(denomination, categorie, duree_heures), profils:formateur_id(nom, prenom, formateur_externe, taux_horaire)')
+      .gte('date_debut', debut)
+      .lte('date_debut', fin),
+    supa.from('bpf_parametres_exercice').select('*').eq('organisation_id', S.organisation.id).eq('annee_exercice', anneeExercice).maybeSingle(),
+  ]);
 
   if (error) { DEBUG.erreur('chargerBPF', error); zone.innerHTML = '<p class="erreur">Erreur de chargement.</p>'; return; }
 
@@ -86,7 +90,10 @@ async function chargerEtAfficherBPF() {
     participants = data || [];
   }
 
-  const donnees = calculerDonneesBPF(sessions || [], participants);
+  window.__bpfAnneeExercice = anneeExercice;
+  window.__bpfAutresCharges = parametres?.autres_charges || 0;
+
+  const donnees = calculerDonneesBPF(sessions || [], participants, window.__bpfAutresCharges);
   window.__bpfDonnees = donnees;
   rendreBPF(donnees);
 }
@@ -101,9 +108,12 @@ const CATEGORIE_STAGIAIRE_PAR_ORIGINE = {
   particulier: 'd',
 };
 
-function calculerDonneesBPF(sessions, participants) {
+function calculerDonneesBPF(sessions, participants, autresCharges) {
   const parSession = {};
   sessions.forEach(s => { parSession[s.id] = s; });
+
+  // B. Formation à distance mise en œuvre sur l'exercice ? (déduit des sessions)
+  const formationADistance = sessions.some(s => s.modalite === 'distanciel' || s.modalite === 'mixte');
 
   // C. Produits par origine de financement
   const produitsParOrigine = {};
@@ -115,15 +125,27 @@ function calculerDonneesBPF(sessions, participants) {
   });
 
   // E. Personnes dispensant des heures de formation (formateurs distincts, internes/externes)
+  // D. sert aussi au cadre D (charges) : heures × taux horaire de chaque formateur.
   const formateurs = {};
   sessions.forEach(s => {
     if (!s.formateur_id) return;
     const heures = Number(s.formations_catalogue?.duree_heures) || 0;
-    if (!formateurs[s.formateur_id]) formateurs[s.formateur_id] = { externe: !!s.profils?.formateur_externe, heures: 0 };
+    if (!formateurs[s.formateur_id]) {
+      formateurs[s.formateur_id] = { externe: !!s.profils?.formateur_externe, heures: 0, tauxHoraire: s.profils?.taux_horaire != null ? Number(s.profils.taux_horaire) : null };
+    }
     formateurs[s.formateur_id].heures += heures;
   });
   const formateursInternes = Object.values(formateurs).filter(f => !f.externe);
   const formateursExternes = Object.values(formateurs).filter(f => f.externe);
+
+  // D. Charges de l'organisme : salaires formateurs internes + achats de
+  // prestation (formateurs externes) calculés depuis heures × taux horaire ;
+  // le reste (loyer, matériel, administratif…) est saisi à la main (autresCharges).
+  const coutFormateur = f => f.tauxHoraire != null ? f.heures * f.tauxHoraire : 0;
+  const salairesFormateurs = formateursInternes.reduce((a, f) => a + coutFormateur(f), 0);
+  const achatsPrestationFormation = formateursExternes.reduce((a, f) => a + coutFormateur(f), 0);
+  const formateursSansTauxHoraire = Object.values(formateurs).some(f => f.tauxHoraire == null);
+  const totalCharges = salairesFormateurs + achatsPrestationFormation + (Number(autresCharges) || 0);
 
   // F. Stagiaires (hors sous-traitance reçue — celle-ci va au cadre G)
   const f1 = { a: { nb: 0, heures: 0 }, b: { nb: 0, heures: 0 }, c: { nb: 0, heures: 0 }, d: { nb: 0, heures: 0 }, e: { nb: 0, heures: 0 } };
@@ -154,7 +176,9 @@ function calculerDonneesBPF(sessions, participants) {
   });
 
   return {
+    formationADistance,
     totalProduits, produitsParOrigine,
+    salairesFormateurs, achatsPrestationFormation, autresCharges: Number(autresCharges) || 0, totalCharges, formateursSansTauxHoraire,
     formateursInternes: formateursInternes.length,
     heuresFormateursInternes: formateursInternes.reduce((a, f) => a + f.heures, 0),
     formateursExternes: formateursExternes.length,
@@ -179,12 +203,38 @@ function rendreBPF(d) {
 
   zone.innerHTML = `
     <div class="carte">
+      <h3 style="margin-top:0;">B. Informations générales</h3>
+      <p style="font-size:13px;margin:0;">Formation en tout ou partie à distance mise en œuvre sur l'exercice : <strong>${d.formationADistance ? 'Oui' : 'Non'}</strong></p>
+      <p style="font-size:12px;color:#55636c;margin:6px 0 0;">Déduit automatiquement de la modalité des sessions (présentiel / distanciel / mixte) — à vérifier si aucune session n'a de modalité renseignée.</p>
+    </div>
+
+    <div class="carte">
       <h3 style="margin-top:0;">C. Produits par origine de financement (hors taxes)</h3>
       <table style="width:100%;border-collapse:collapse;font-size:13px;">
         <tbody>${lignesOrigine || '<tr><td style="padding:4px 6px;color:#55636c;">Aucune session sur cet exercice.</td></tr>'}</tbody>
         <tfoot><tr style="border-top:2px solid #ddd;font-weight:600;"><td style="padding:6px;">Total</td><td style="padding:6px;text-align:right;">${d.totalProduits.toFixed(2)} €</td></tr></tfoot>
       </table>
       <p style="font-size:12px;color:#55636c;margin-top:8px;">Le total des charges et la part du chiffre d'affaires global réalisée en formation professionnelle ne sont pas suivis dans l'appli — à compléter à la main lors de la déclaration.</p>
+    </div>
+
+    <div class="carte">
+      <h3 style="margin-top:0;">D. Charges de l'organisme (hors taxes)</h3>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <tbody>
+          <tr><td style="padding:4px 6px;">Salaires des formateurs (internes, calculé : heures × taux horaire)</td><td style="padding:4px 6px;text-align:right;">${d.salairesFormateurs.toFixed(2)} €</td></tr>
+          <tr><td style="padding:4px 6px;">Achats de prestation de formation et honoraires (formateurs externes)</td><td style="padding:4px 6px;text-align:right;">${d.achatsPrestationFormation.toFixed(2)} €</td></tr>
+          <tr>
+            <td style="padding:4px 6px;">Autres charges (loyer, matériel, administratif…)</td>
+            <td style="padding:4px 6px;text-align:right;">
+              <input id="bpf-autres-charges" type="number" step="0.01" style="width:110px;text-align:right;display:inline-block;" value="${d.autresCharges}">
+              <button class="bouton" style="padding:4px 8px;font-size:12px;margin-left:6px;" onclick="enregistrerAutresChargesBPF()">OK</button>
+            </td>
+          </tr>
+        </tbody>
+        <tfoot><tr style="border-top:2px solid #ddd;font-weight:600;"><td style="padding:6px;">Total des charges</td><td style="padding:6px;text-align:right;">${d.totalCharges.toFixed(2)} €</td></tr></tfoot>
+      </table>
+      ${d.formateursSansTauxHoraire ? `<p style="font-size:12px;color:#b3261e;margin-top:8px;">Au moins un formateur intervenu sur cet exercice n'a pas de taux horaire renseigné (onglet Formateurs) — son coût n'est pas compté ci-dessus.</p>` : ''}
+      <p style="font-size:12px;color:#55636c;margin-top:8px;">"Autres charges" est saisi à la main, une fois par exercice.</p>
     </div>
 
     <div class="carte">
@@ -230,6 +280,18 @@ function rendreBPF(d) {
       <button class="bouton" onclick="genererRecapBPF()">Générer le récapitulatif PDF</button>
       <p style="font-size:12px;color:#55636c;margin:8px 0 0;">Ce PDF est une aide interne, pas le formulaire officiel — reporte les chiffres sur monactiviteformation.emploi.gouv.fr avant le 30 avril.</p>
     </div>`;
+}
+
+async function enregistrerAutresChargesBPF() {
+  const valeur = Number($('#bpf-autres-charges').value) || 0;
+  const { error } = await supa.from('bpf_parametres_exercice').upsert({
+    organisation_id: S.organisation.id,
+    annee_exercice: window.__bpfAnneeExercice,
+    autres_charges: valeur,
+  }, { onConflict: 'organisation_id,annee_exercice' });
+  if (error) { DEBUG.erreur('enregistrerAutresChargesBPF', error); toast('Erreur : ' + error.message, 'erreur'); return; }
+  toast('Charges mises à jour.');
+  chargerEtAfficherBPF();
 }
 
 function genererRecapBPF() {

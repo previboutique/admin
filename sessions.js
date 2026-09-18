@@ -108,12 +108,13 @@ async function ecranSessions(vue) {
 
   const { data, error } = await supa
     .from('sessions_formation')
-    .select('id, date_debut, date_fin, lieu, statut, formations_catalogue(denomination), clients(raison_sociale)')
+    .select('id, numero_session, date_debut, date_fin, lieu, statut, formations_catalogue(denomination), session_clients(clients(raison_sociale))')
     .order('date_debut', { ascending: false })
     .limit(300);
 
   const zone = $('#liste-sessions');
   if (error) { DEBUG.erreur('ecranSessions', error); zone.textContent = 'Erreur de chargement.'; return; }
+  (data || []).forEach(s => { s.__nomsClients = (s.session_clients || []).map(sc => sc.clients?.raison_sociale).filter(Boolean); });
   window.__sessionsToutes = data || [];
   filtrerEtAfficherSessions();
 }
@@ -141,7 +142,8 @@ function filtrerEtAfficherSessions() {
     if (dateFin && s.date_debut > dateFin) return false;
     if (texte) {
       const cible = [
-        s.clients?.raison_sociale || '',
+        s.numero_session || '',
+        (s.__nomsClients || []).join(' '),
         s.formations_catalogue?.denomination || '',
         s.lieu || '',
       ].join(' ').toLowerCase();
@@ -154,14 +156,15 @@ function filtrerEtAfficherSessions() {
 
   zone.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:14px;">
     <thead><tr style="text-align:left;color:#55636c;font-size:12px;">
-      <th style="padding:6px 8px;">Date</th><th style="padding:6px 8px;">Formation</th>
-      <th style="padding:6px 8px;">Client</th><th style="padding:6px 8px;">Statut</th>
+      <th style="padding:6px 8px;">N°</th><th style="padding:6px 8px;">Date</th><th style="padding:6px 8px;">Formation</th>
+      <th style="padding:6px 8px;">Client(s)</th><th style="padding:6px 8px;">Statut</th>
     </tr></thead>
     <tbody>${data.map(s => `
       <tr style="border-top:1px solid #eee;cursor:pointer;" onclick="ouvrirSession('${s.id}')">
+        <td style="padding:6px 8px;color:#55636c;font-variant-numeric:tabular-nums;">${esc(s.numero_session || '—')}</td>
         <td style="padding:6px 8px;">${formatDateFr(s.date_debut)}</td>
         <td style="padding:6px 8px;">${esc(s.formations_catalogue?.denomination || '')}</td>
-        <td style="padding:6px 8px;">${esc(s.clients?.raison_sociale || '—')}</td>
+        <td style="padding:6px 8px;">${esc((s.__nomsClients || []).join(', ') || '—')}</td>
         <td style="padding:6px 8px;">${esc(s.statut)}</td>
       </tr>`).join('')}
     </tbody></table>`;
@@ -171,22 +174,21 @@ function filtrerEtAfficherSessions() {
 // CRÉATION D'UNE SESSION
 // ============================================================================
 
+let __nsCompteurLigneClient = 0;
+
 async function ecranNouvelleSession(vue) {
   const { data: clients } = await supa.from('clients').select('id, raison_sociale').eq('actif', true).order('raison_sociale');
   const { data: formations } = await supa.from('formations_catalogue').select('id, code, categorie, denomination').eq('actif', true).order('categorie').order('denomination');
 
   const parCategorie = {};
   (formations || []).forEach(f => { (parCategorie[f.categorie] = parCategorie[f.categorie] || []).push(f); });
+  window.__nsClientsDisponibles = clients || [];
+  window.__nsFormations = formations || [];
+  __nsCompteurLigneClient = 0;
 
   vue.innerHTML = `
-    <div class="carte" style="max-width:560px;">
+    <div class="carte" style="max-width:620px;">
       <h2 style="margin-top:0;">Nouvelle session</h2>
-
-      <label for="ns-client">Client</label>
-      <input id="ns-client" list="ns-clients-liste" placeholder="Rechercher un client…">
-      <datalist id="ns-clients-liste">
-        ${(clients || []).map(c => `<option data-id="${c.id}" value="${esc(c.raison_sociale)}">`).join('')}
-      </datalist>
 
       <label for="ns-formation">Formation</label>
       <select id="ns-formation">
@@ -209,14 +211,24 @@ async function ecranNouvelleSession(vue) {
           <label for="ns-date-fin">Date de fin</label>
           <input id="ns-date-fin" type="date">
         </div>
-        <div style="flex:1;">
-          <label for="ns-prix">Tarif (€)</label>
-          <input id="ns-prix" type="number" step="0.01" placeholder="pré-rempli depuis le catalogue">
-        </div>
       </div>
-      <p style="font-size:12px;color:#55636c;margin:2px 0 0;">Le tarif est pré-rempli depuis le catalogue mais modifiable pour cette session uniquement — il ne change pas le prix catalogue.</p>
 
-      <label for="ns-origine">Origine du financement</label>
+      <label style="margin-top:14px;">Client(s) de la session</label>
+      <p style="font-size:12px;color:#55636c;margin:2px 0 8px;">Une session peut réunir plusieurs entreprises (formation mutualisée) — chacune avec son propre tarif, pré-rempli depuis le catalogue mais modifiable.</p>
+      <div id="ns-clients-lignes"></div>
+      <datalist id="ns-clients-liste">
+        ${(clients || []).map(c => `<option data-id="${c.id}" value="${esc(c.raison_sociale)}">`).join('')}
+      </datalist>
+      <button class="bouton" style="background:#eee;color:#333;font-size:13px;padding:6px 12px;margin-top:6px;" onclick="ajouterLigneClientSession()">+ Ajouter un client</button>
+
+      <label for="ns-modalite" style="margin-top:14px;">Modalité</label>
+      <select id="ns-modalite">
+        <option value="presentiel" selected>Présentiel</option>
+        <option value="distanciel">Distanciel (classe virtuelle, e-learning…)</option>
+        <option value="mixte">Mixte</option>
+      </select>
+
+      <label for="ns-origine" style="margin-top:14px;">Origine du financement</label>
       <select id="ns-origine">
         ${ORIGINES_FINANCEMENT.map(g => `
           <optgroup label="${esc(g.groupe)}">
@@ -234,41 +246,102 @@ async function ecranNouvelleSession(vue) {
       <div class="erreur" id="ns-erreur"></div>
     </div>`;
 
+  ajouterLigneClientSession();
+
   $('#ns-formation').onchange = (e) => {
     const f = (formations || []).find(x => x.id === e.target.value);
-    if (f && f.prix != null && !$('#ns-prix').value) $('#ns-prix').value = f.prix;
+    if (f && f.prix != null) {
+      $$('.ns-client-prix').forEach(input => { if (!input.value) input.value = f.prix; });
+    }
   };
 
   $('#ns-valider').onclick = async () => {
-    const clientInput = $('#ns-client').value.trim();
-    const option = $$('#ns-clients-liste option').find(o => o.value === clientInput);
     const formationId = $('#ns-formation').value;
     const dateDebut = $('#ns-date-debut').value;
     const dateFin = $('#ns-date-fin').value || dateDebut;
     const lieu = $('#ns-lieu').value.trim();
-    const prix = $('#ns-prix').value ? Number($('#ns-prix').value) : null;
     const origineFinancement = $('#ns-origine').value;
     const sousTraitanceRecue = $('#ns-sous-traitance').checked;
 
     if (!formationId || !dateDebut) { $('#ns-erreur').textContent = 'Formation et date de début obligatoires.'; return; }
 
+    const lignesClients = lireLignesClientSession();
+    if (lignesClients.erreur) { $('#ns-erreur').textContent = lignesClients.erreur; return; }
+
+    const premier = lignesClients.valides[0];
     const { data, error } = await supa.from('sessions_formation').insert({
       organisation_id: S.organisation.id,
       formation_id: formationId,
-      client_id: option ? option.dataset.id : null,
+      client_id: premier ? premier.clientId : null,     // client "principal" pour compatibilité — la vérité est dans session_clients
       lieu: lieu || null,
       date_debut: dateDebut,
       date_fin: dateFin,
-      prix_unitaire: prix,
+      prix_unitaire: premier ? premier.prix : null,
+      modalite: $('#ns-modalite').value,
       origine_financement: origineFinancement,
       sous_traitance_recue: sousTraitanceRecue,
       formateur_id: S.profil.role === 'formateur' ? S.profil.id : null,
     }).select().single();
 
     if (error) { DEBUG.erreur('creerSession', error); $('#ns-erreur').textContent = 'Erreur : ' + error.message; return; }
+
+    if (lignesClients.valides.length) {
+      const { error: errClients } = await supa.from('session_clients').insert(
+        lignesClients.valides.map(l => ({
+          organisation_id: S.organisation.id,
+          session_id: data.id,
+          client_id: l.clientId,
+          prix_unitaire: l.prix,
+          numero_devis: l.devis,
+        }))
+      );
+      if (errClients) { DEBUG.erreur('creerSessionClients', errClients); toast('Session créée, mais erreur sur les clients : ' + errClients.message, 'erreur'); }
+    }
+
     toast('Session créée.');
     ouvrirSession(data.id);
   };
+}
+
+function ajouterLigneClientSession() {
+  const id = ++__nsCompteurLigneClient;
+  const zone = $('#ns-clients-lignes');
+  const ligne = document.createElement('div');
+  ligne.className = 'ns-ligne-client';
+  ligne.dataset.id = id;
+  ligne.style.cssText = 'display:flex;gap:8px;align-items:flex-end;margin-bottom:8px;';
+  ligne.innerHTML = `
+    <div style="flex:2;">
+      <input class="ns-client-input" list="ns-clients-liste" placeholder="Rechercher un client…">
+    </div>
+    <div style="flex:1;">
+      <input class="ns-client-prix" type="number" step="0.01" placeholder="Tarif (€)">
+    </div>
+    <div style="flex:1;">
+      <input class="ns-client-devis" placeholder="N° devis">
+    </div>
+    <button type="button" class="bouton" style="background:#fdeeee;color:#b3261e;padding:8px 10px;" onclick="this.closest('.ns-ligne-client').remove()">✕</button>`;
+  zone.appendChild(ligne);
+}
+
+function lireLignesClientSession() {
+  const lignes = $$('.ns-ligne-client');
+  const valides = [];
+  for (const ligne of lignes) {
+    const texte = $('.ns-client-input', ligne).value.trim();
+    if (!texte) continue;
+    const option = $$('#ns-clients-liste option').find(o => o.value === texte);
+    if (!option) return { erreur: `Client "${texte}" introuvable dans la liste — choisis-le parmi les suggestions.` };
+    const clientId = option.dataset.id;
+    if (valides.some(v => v.clientId === clientId)) return { erreur: `Le client "${texte}" est renseigné plusieurs fois.` };
+    const prixTxt = $('.ns-client-prix', ligne).value;
+    valides.push({
+      clientId,
+      prix: prixTxt ? Number(prixTxt) : null,
+      devis: $('.ns-client-devis', ligne).value.trim() || null,
+    });
+  }
+  return { valides };
 }
 
 // ============================================================================
@@ -283,25 +356,28 @@ async function ouvrirSession(id) {
 
   const { data: session, error } = await supa
     .from('sessions_formation')
-    .select('*, formations_catalogue(*), clients(raison_sociale)')
+    .select('*, formations_catalogue(*)')
     .eq('id', id)
     .single();
 
   if (error) { DEBUG.erreur('ouvrirSession', error); vue.innerHTML = '<div class="carte">Session introuvable ou accès refusé.</div>'; return; }
 
-  const { data: participants } = await supa
-    .from('session_participants')
-    .select('*, stagiaires(civilite, nom, prenom, date_naissance)')
-    .eq('session_id', id);
+  const [{ data: participants }, { data: sessionClients }] = await Promise.all([
+    supa.from('session_participants').select('*, stagiaires(civilite, nom, prenom, date_naissance), clients(raison_sociale, ville)').eq('session_id', id),
+    supa.from('session_clients').select('*, clients(raison_sociale, ville)').eq('session_id', id).order('created_at'),
+  ]);
+
+  window.__sessionClients = sessionClients || [];
+  const nomsClients = (sessionClients || []).map(sc => sc.clients?.raison_sociale).filter(Boolean);
 
   vue.innerHTML = `
     <div class="carte" style="display:flex;justify-content:space-between;align-items:flex-start;">
       <div>
-        <h2 style="margin:0 0 4px;">${esc(session.formations_catalogue?.denomination || '')}</h2>
+        <h2 style="margin:0 0 4px;">${esc(session.formations_catalogue?.denomination || '')} <span style="color:#55636c;font-weight:normal;font-size:14px;">— n° ${esc(session.numero_session || '—')}</span></h2>
         <p style="margin:0;color:#55636c;font-size:14px;">
           ${formatDateFr(session.date_debut)}${session.date_fin !== session.date_debut ? ' → ' + formatDateFr(session.date_fin) : ''}
           — ${esc(session.lieu || 'lieu non renseigné')}
-          — ${esc(session.clients?.raison_sociale || 'sans client')}
+          — ${esc(nomsClients.join(', ') || 'sans client')}
           — statut : ${esc(session.statut)}
         </p>
       </div>
@@ -316,16 +392,29 @@ async function ouvrirSession(id) {
 
     ${PEUT_GERER_SESSIONS() ? `
     <div class="carte">
-      <h3 style="margin-top:0;">Tarif</h3>
-      <div style="display:flex;gap:10px;align-items:center;">
-        <input id="sess-prix" type="number" step="0.01" value="${session.prix_unitaire != null ? session.prix_unitaire : ''}" style="max-width:160px;">
-        <span style="font-size:13px;color:#55636c;">€ — propre à cette session, ne modifie pas le tarif du catalogue</span>
-        <button class="bouton" style="padding:6px 14px;font-size:13px;" onclick="enregistrerPrixSession('${session.id}')">Enregistrer</button>
+      <h3 style="margin-top:0;">Clients de la session</h3>
+      <p style="font-size:12px;color:#55636c;margin:0 0 10px;">Chaque client a son propre tarif — utile pour une formation mutualisée entre plusieurs entreprises.</p>
+      <div id="sess-clients-liste"></div>
+      <div style="display:flex;gap:8px;align-items:flex-end;margin-top:10px;">
+        <div style="flex:2;">
+          <label for="sess-client-nouveau">Ajouter un client</label>
+          <input id="sess-client-nouveau" list="sess-clients-liste-datalist" placeholder="Rechercher un client…">
+          <datalist id="sess-clients-liste-datalist"></datalist>
+        </div>
+        <div style="flex:1;"><label for="sess-client-nouveau-prix">Tarif (€)</label><input id="sess-client-nouveau-prix" type="number" step="0.01"></div>
+        <div style="flex:1;"><label for="sess-client-nouveau-devis">N° devis</label><input id="sess-client-nouveau-devis"></div>
+        <button class="bouton" style="padding:8px 14px;" onclick="ajouterClientSessionExistante('${session.id}')">Ajouter</button>
       </div>
     </div>
 
     <div class="carte">
       <h3 style="margin-top:0;">Financement</h3>
+      <label for="sess-modalite">Modalité</label>
+      <select id="sess-modalite" style="max-width:420px;">
+        <option value="presentiel" ${session.modalite === 'presentiel' ? 'selected' : ''}>Présentiel</option>
+        <option value="distanciel" ${session.modalite === 'distanciel' ? 'selected' : ''}>Distanciel (classe virtuelle, e-learning…)</option>
+        <option value="mixte" ${session.modalite === 'mixte' ? 'selected' : ''}>Mixte</option>
+      </select>
       <label for="sess-origine">Origine du financement</label>
       <select id="sess-origine" style="max-width:420px;">
         ${ORIGINES_FINANCEMENT.map(g => `
@@ -343,9 +432,11 @@ async function ouvrirSession(id) {
 
     <div class="carte">
       <h3 style="margin-top:0;">Documents de la session</h3>
-      <button class="bouton" onclick="genererConvention(window.__sessionCourante, window.__participantsCourants)">Convention</button>
-      <button class="bouton" style="margin-left:8px;" onclick="genererFeuillePresence(window.__sessionCourante, window.__participantsCourants)">Feuille d'émargement</button>
-      <p style="font-size:12px;color:#55636c;margin:8px 0 0;">La feuille d'émargement n'a pas de modèle papier de référence confirmé — mise en page à ajuster si besoin.</p>
+      ${(sessionClients && sessionClients.length) ?
+        sessionClients.map(sc => `<button class="bouton" style="margin:0 8px 8px 0;" onclick="genererConventionPourClient('${sc.client_id}')">Convention — ${esc(sc.clients?.raison_sociale || '')}</button>`).join('')
+        : `<button class="bouton" style="margin:0 8px 8px 0;" onclick="genererConvention(window.__sessionCourante, window.__participantsCourants)">Convention</button>`}
+      <button class="bouton" style="margin:0 0 8px;" onclick="genererFeuillePresence(window.__sessionCourante, window.__participantsCourants)">Feuille d'émargement</button>
+      <p style="font-size:12px;color:#55636c;margin:8px 0 0;">Chaque client a sa propre Convention (tarif et liste de stagiaires qui lui sont rattachés). La feuille d'émargement n'a pas de modèle papier de référence confirmé — mise en page à ajuster si besoin.</p>
     </div>
 
     <div class="carte">
@@ -359,6 +450,11 @@ async function ouvrirSession(id) {
       <div id="participants-liste"></div>
       ${PEUT_GERER_SESSIONS() ? `
       <div style="margin-top:16px;border-top:1px solid #eee;padding-top:16px;">
+        ${sessionClients && sessionClients.length > 1 ? `
+        <label for="sp-client">Entreprise cliente du stagiaire à ajouter</label>
+        <select id="sp-client">
+          ${sessionClients.map(sc => `<option value="${sc.client_id}">${esc(sc.clients?.raison_sociale || '')}</option>`).join('')}
+        </select>` : ''}
         <label for="sp-recherche">Ajouter un stagiaire (recherche par nom / prénom)</label>
         <input id="sp-recherche" placeholder="Nom ou prénom…">
         <div id="sp-resultats" style="margin-top:8px;"></div>
@@ -369,6 +465,7 @@ async function ouvrirSession(id) {
   rendreSelectionDocuments(session, participants || []);
 
   if (PEUT_GERER_SESSIONS()) {
+    rendreClientsSession(session.id, window.__sessionClients);
     let timer;
     $('#sp-recherche').oninput = (e) => {
       clearTimeout(timer);
@@ -377,23 +474,103 @@ async function ouvrirSession(id) {
   }
 }
 
-async function enregistrerPrixSession(sessionId) {
-  const valeur = $('#sess-prix').value;
-  const { error } = await supa.from('sessions_formation').update({ prix_unitaire: valeur ? Number(valeur) : null }).eq('id', sessionId);
-  if (error) { DEBUG.erreur('enregistrerPrixSession', error); toast('Erreur : ' + error.message, 'erreur'); return; }
-  toast('Tarif mis à jour.');
-  if (window.__sessionCourante) window.__sessionCourante.prix_unitaire = valeur ? Number(valeur) : null;
+// Génère la Convention de formation pour UN client de la session (chaque
+// client a sa propre Convention — tarif et annexe limités à ses stagiaires).
+function genererConventionPourClient(clientId) {
+  const clientEntry = (window.__sessionClients || []).find(sc => sc.client_id === clientId);
+  if (!clientEntry) { toast('Client introuvable pour cette session.', 'erreur'); return; }
+  genererConvention(window.__sessionCourante, window.__participantsCourants, false, clientEntry);
+}
+
+// Détermine le client actuellement sélectionné pour l'ajout d'un stagiaire à
+// une session (le sélecteur s'il y a plusieurs clients, sinon le seul client
+// de la session, sinon aucun).
+function clientSelectionnePourAjout(session) {
+  const selecteur = $('#sp-client');
+  if (selecteur) return selecteur.value || null;
+  const clients = window.__sessionClients || [];
+  return clients.length === 1 ? clients[0].client_id : null;
+}
+
+// ============================================================================
+// CLIENTS DE LA SESSION (une session peut en réunir plusieurs, chacun avec
+// son propre tarif — voir session_clients).
+// ============================================================================
+
+function rendreClientsSession(sessionId, sessionClients) {
+  const zone = $('#sess-clients-liste');
+  if (!zone) return;
+
+  if (!sessionClients.length) {
+    zone.innerHTML = '<p style="color:#55636c;font-size:13px;">Aucun client rattaché à cette session pour l\'instant.</p>';
+  } else {
+    zone.innerHTML = sessionClients.map(sc => `
+      <div style="display:flex;gap:8px;align-items:center;padding:6px 0;border-top:1px solid #eee;font-size:13px;">
+        <strong style="flex:2;">${esc(sc.clients?.raison_sociale || '')}</strong>
+        <input type="number" step="0.01" class="sc-prix" data-scid="${sc.id}" value="${sc.prix_unitaire != null ? sc.prix_unitaire : ''}" placeholder="Tarif (€)" style="flex:1;">
+        <input class="sc-devis" data-scid="${sc.id}" value="${esc(sc.numero_devis || '')}" placeholder="N° devis" style="flex:1;">
+        <button class="bouton" style="padding:5px 10px;font-size:12px;" onclick="enregistrerClientSession('${sc.id}')">Enregistrer</button>
+        <button class="bouton" style="padding:5px 10px;font-size:12px;background:#fdeeee;color:#b3261e;" onclick="retirerClientSession('${sc.id}', '${sessionId}')">Retirer</button>
+      </div>`).join('');
+  }
+
+  // Datalist "ajouter un client" : uniquement les clients pas encore dans la session.
+  const dejaPresents = new Set(sessionClients.map(sc => sc.client_id));
+  supa.from('clients').select('id, raison_sociale').eq('actif', true).order('raison_sociale').then(({ data }) => {
+    const dl = $('#sess-clients-liste-datalist');
+    if (dl) dl.innerHTML = (data || []).filter(c => !dejaPresents.has(c.id)).map(c => `<option data-id="${c.id}" value="${esc(c.raison_sociale)}">`).join('');
+  });
+}
+
+async function enregistrerClientSession(sessionClientId) {
+  const prixInput = document.querySelector(`.sc-prix[data-scid="${sessionClientId}"]`);
+  const devisInput = document.querySelector(`.sc-devis[data-scid="${sessionClientId}"]`);
+  const { error } = await supa.from('session_clients').update({
+    prix_unitaire: prixInput.value ? Number(prixInput.value) : null,
+    numero_devis: devisInput.value.trim() || null,
+  }).eq('id', sessionClientId);
+  if (error) { DEBUG.erreur('enregistrerClientSession', error); toast('Erreur : ' + error.message, 'erreur'); return; }
+  toast('Tarif client mis à jour.');
+}
+
+async function retirerClientSession(sessionClientId, sessionId) {
+  const { error } = await supa.from('session_clients').delete().eq('id', sessionClientId);
+  if (error) { DEBUG.erreur('retirerClientSession', error); toast('Erreur : ' + error.message, 'erreur'); return; }
+  toast('Client retiré de la session.');
+  ouvrirSession(sessionId);
+}
+
+async function ajouterClientSessionExistante(sessionId) {
+  const texte = $('#sess-client-nouveau').value.trim();
+  const option = $$('#sess-clients-liste-datalist option').find(o => o.value === texte);
+  if (!option) { toast('Choisis un client dans la liste des suggestions.', 'erreur'); return; }
+
+  const { error } = await supa.from('session_clients').insert({
+    organisation_id: S.organisation.id,
+    session_id: sessionId,
+    client_id: option.dataset.id,
+    prix_unitaire: $('#sess-client-nouveau-prix').value ? Number($('#sess-client-nouveau-prix').value) : null,
+    numero_devis: $('#sess-client-nouveau-devis').value.trim() || null,
+  });
+  if (error) {
+    if (error.code === '23505') { toast('Ce client est déjà rattaché à cette session.', 'erreur'); return; }
+    DEBUG.erreur('ajouterClientSessionExistante', error); toast('Erreur : ' + error.message, 'erreur'); return;
+  }
+  toast('Client ajouté à la session.');
+  ouvrirSession(sessionId);
 }
 
 async function enregistrerFinancementSession(sessionId) {
   const origine = $('#sess-origine').value;
   const sousTraitance = $('#sess-sous-traitance').checked;
-  const { error } = await supa.from('sessions_formation').update({ origine_financement: origine, sous_traitance_recue: sousTraitance }).eq('id', sessionId);
+  const modalite = $('#sess-modalite').value;
+  const { error } = await supa.from('sessions_formation').update({ origine_financement: origine, sous_traitance_recue: sousTraitance, modalite }).eq('id', sessionId);
   if (error) { DEBUG.erreur('enregistrerFinancementSession', error); toast('Erreur : ' + error.message, 'erreur'); return; }
   toast('Financement mis à jour.');
   if (window.__sessionCourante) {
     window.__sessionCourante.origine_financement = origine;
     window.__sessionCourante.sous_traitance_recue = sousTraitance;
+    window.__sessionCourante.modalite = modalite;
   }
 }
 
@@ -554,10 +731,12 @@ async function rechercherStagiaires(texte, session) {
 
   if (error) { DEBUG.erreur('rechercherStagiaires', error); return; }
 
-  // Priorité d'affichage aux stagiaires déjà liés au même client que la session
+  const clientChoisi = clientSelectionnePourAjout(session);
+
+  // Priorité d'affichage aux stagiaires déjà liés au client sélectionné pour l'ajout
   const tries = (data || []).slice().sort((a, b) => {
-    const aMatch = a.client_id === session.client_id ? 0 : 1;
-    const bMatch = b.client_id === session.client_id ? 0 : 1;
+    const aMatch = a.client_id === clientChoisi ? 0 : 1;
+    const bMatch = b.client_id === clientChoisi ? 0 : 1;
     return aMatch - bMatch;
   });
 
@@ -565,21 +744,22 @@ async function rechercherStagiaires(texte, session) {
     ${tries.map(s => `
       <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border:1px solid #e0e0e0;border-radius:6px;margin-bottom:6px;font-size:13px;">
         <span>${esc(s.prenom)} ${esc(s.nom)} ${s.date_naissance ? '— né(e) le ' + formatDateFr(s.date_naissance) : ''} ${s.clients?.raison_sociale ? '— ' + esc(s.clients.raison_sociale) : ''}
-          ${s.client_id === session.client_id && session.client_id ? '<span style="color:#0a5c8a;font-weight:600;">(même client)</span>' : ''}
+          ${s.client_id === clientChoisi && clientChoisi ? '<span style="color:#0a5c8a;font-weight:600;">(même client)</span>' : ''}
         </span>
-        <button class="bouton" style="padding:4px 10px;font-size:12px;" onclick="ajouterParticipant('${s.id}', '${session.id}')">Ajouter</button>
+        <button class="bouton" style="padding:4px 10px;font-size:12px;" onclick="ajouterParticipant('${s.id}', '${session.id}', '${clientChoisi || ''}')">Ajouter</button>
       </div>`).join('')}
     <div style="padding:8px;border:1px dashed #c9c9c9;border-radius:6px;font-size:13px;color:#55636c;">
       Stagiaire introuvable ?
-      <button class="bouton" style="padding:4px 10px;font-size:12px;margin-left:6px;" onclick="ouvrirFormNouveauStagiaire('${texte.replace(/'/g, "\\'")}', '${session.id}', '${session.client_id || ''}')">Créer "${esc(texte)}"</button>
+      <button class="bouton" style="padding:4px 10px;font-size:12px;margin-left:6px;" onclick="ouvrirFormNouveauStagiaire('${texte.replace(/'/g, "\\'")}', '${session.id}', '${clientChoisi || ''}')">Créer "${esc(texte)}"</button>
     </div>`;
 }
 
-async function ajouterParticipant(stagiaireId, sessionId) {
+async function ajouterParticipant(stagiaireId, sessionId, clientId) {
   const { error } = await supa.from('session_participants').insert({
     organisation_id: S.organisation.id,
     session_id: sessionId,
     stagiaire_id: stagiaireId,
+    client_id: clientId || null,
     statut: 'inscrit',
   });
   if (error) {
@@ -621,5 +801,5 @@ async function creerEtAjouterStagiaire(sessionId, clientId) {
   }).select().single();
 
   if (error) { DEBUG.erreur('creerStagiaire', error); toast('Erreur : ' + error.message, 'erreur'); return; }
-  ajouterParticipant(stagiaire.id, sessionId);
+  ajouterParticipant(stagiaire.id, sessionId, clientId);
 }

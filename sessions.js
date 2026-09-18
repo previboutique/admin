@@ -151,6 +151,27 @@ function reinitialiserFiltresSessions() {
   filtrerEtAfficherSessions();
 }
 
+// Tri de la liste des sessions — colonne cliquée dans l'en-tête, cliquer à
+// nouveau inverse le sens. Par défaut : date la plus récente d'abord (ordre
+// déjà renvoyé par la requête).
+window.__sessionsTri = { colonne: 'date_debut', sens: 'desc' };
+
+const SESSIONS_COLONNES_TRI = {
+  numero_session: { libelle: 'N°', valeur: s => s.numero_session || '' },
+  date_debut: { libelle: 'Date', valeur: s => s.date_debut || '' },
+  formation: { libelle: 'Formation', valeur: s => s.formations_catalogue?.denomination || '' },
+  clients: { libelle: 'Client(s)', valeur: s => (s.__nomsClients || []).join(', ') },
+  stagiaires: { libelle: 'Stagiaires', valeur: s => s.__nbStagiaires || 0, numerique: true, alignDroite: true },
+  statut: { libelle: 'Statut', valeur: s => s.statut || '' },
+};
+
+function trierSessionsPar(colonne) {
+  const tri = window.__sessionsTri;
+  if (tri.colonne === colonne) tri.sens = tri.sens === 'asc' ? 'desc' : 'asc';
+  else { tri.colonne = colonne; tri.sens = colonne === 'date_debut' ? 'desc' : 'asc'; }
+  filtrerEtAfficherSessions();
+}
+
 function filtrerEtAfficherSessions() {
   const zone = $('#liste-sessions');
   if (!zone) return;
@@ -185,10 +206,24 @@ function filtrerEtAfficherSessions() {
 
   if (data.length === 0) { zone.innerHTML = '<p style="color:#55636c;">Aucune session ne correspond à ces critères.</p>'; return; }
 
+  const tri = window.__sessionsTri;
+  const { valeur, numerique } = SESSIONS_COLONNES_TRI[tri.colonne] || SESSIONS_COLONNES_TRI.date_debut;
+  data.sort((a, b) => {
+    const va = valeur(a), vb = valeur(b);
+    const cmp = numerique ? va - vb : String(va).localeCompare(String(vb), 'fr');
+    return tri.sens === 'asc' ? cmp : -cmp;
+  });
+
+  const enTete = (colonne) => {
+    const def = SESSIONS_COLONNES_TRI[colonne];
+    const actif = tri.colonne === colonne;
+    const fleche = actif ? (tri.sens === 'asc' ? ' ▲' : ' ▼') : '';
+    return `<th style="padding:6px 8px;cursor:pointer;user-select:none;white-space:nowrap;${def.alignDroite ? 'text-align:right;' : ''}${actif ? 'color:#0a5c8a;' : ''}" onclick="trierSessionsPar('${colonne}')">${esc(def.libelle)}${fleche}</th>`;
+  };
+
   zone.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:14px;">
     <thead><tr style="text-align:left;color:#55636c;font-size:12px;">
-      <th style="padding:6px 8px;">N°</th><th style="padding:6px 8px;">Date</th><th style="padding:6px 8px;">Formation</th>
-      <th style="padding:6px 8px;">Client(s)</th><th style="padding:6px 8px;text-align:right;">Stagiaires</th><th style="padding:6px 8px;">Statut</th>
+      ${enTete('numero_session')}${enTete('date_debut')}${enTete('formation')}${enTete('clients')}${enTete('stagiaires')}${enTete('statut')}
     </tr></thead>
     <tbody>${data.map(s => `
       <tr style="border-top:1px solid #eee;cursor:pointer;${s.__nbStagiaires === 0 ? 'background:#fdf6e8;' : ''}" onclick="ouvrirSession('${s.id}')">

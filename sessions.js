@@ -120,11 +120,12 @@ async function ecranSessions(vue) {
       <div id="bulk-suppression-zone"></div>
       <div id="bulk-formateur-zone"></div>
     </div>
+    <div id="doublons-sessions-zone"></div>
     <div class="carte"><div id="liste-sessions">Chargement…</div></div>`;
 
   const [{ data, error }, { data: formateurs }] = await Promise.all([
     supa.from('sessions_formation')
-      .select('id, numero_session, date_debut, date_fin, lieu, statut, formateur_id, formations_catalogue(denomination), session_clients(clients(raison_sociale)), session_participants(count)')
+      .select('id, numero_session, date_debut, date_fin, lieu, statut, formateur_id, formation_id, created_at, formations_catalogue(denomination), session_clients(clients(raison_sociale)), session_participants(count)')
       .order('date_debut', { ascending: false })
       .limit(300),
     supa.from('profils').select('id, nom, prenom, formateur_externe').eq('actif', true).order('nom'),
@@ -139,6 +140,7 @@ async function ecranSessions(vue) {
   window.__sessionsToutes = data || [];
   window.__sessionsFormateursDisponibles = formateurs || [];
   filtrerEtAfficherSessions();
+  rendreDoublonsSessions();
 }
 
 function reinitialiserFiltresSessions() {
@@ -323,6 +325,89 @@ async function assignerFormateurGroupe() {
   const { error } = await supa.from('sessions_formation').update({ formateur_id: formateurId }).in('id', ids);
   if (error) { DEBUG.erreur('assignerFormateurGroupe', error); toast('Erreur : ' + error.message, 'erreur'); return; }
   toast(`Formateur assigné à ${cibles.length} session(s).`);
+  ecranSessions($('#vue'));
+}
+
+// ============================================================================
+// DOUBLONS DE SESSIONS (ex. import rejoué après une première tentative en
+// échec) — détection automatique, revue manuelle obligatoire (jamais de
+// fusion automatique) puis fusion via la fonction RPC fusionner_sessions,
+// qui reporte stagiaires/clients/documents/envois sur la session conservée.
+// Même principe que la détection de doublons de l'écran Stagiaires.
+// ============================================================================
+
+// Clé de regroupement : même formation, mêmes dates, même lieu, mêmes
+// client(s) — le cas typique d'un import rejoué (échec réseau, double clic…)
+// qui recrée à l'identique la même session.
+function sesCleDoublon(s) {
+  const lieu = (s.lieu || '').trim().toLowerCase();
+  const clients = (s.__nomsClients || []).slice().sort((a, b) => a.localeCompare(b)).join('|').toLowerCase();
+  return `${s.formation_id}|${s.date_debut}|${s.date_fin}|${lieu}|${clients}`;
+}
+
+function detecterDoublonsSessions(liste) {
+  const groupes = {};
+  liste.forEach(s => {
+    if (!s.formation_id || !s.date_debut) return;
+    const cle = sesCleDoublon(s);
+    (groupes[cle] = groupes[cle] || []).push(s);
+  });
+  return Object.values(groupes).filter(g => g.length > 1);
+}
+
+function rendreDoublonsSessions() {
+  const zone = $('#doublons-sessions-zone');
+  if (!zone) return;
+  if (!PEUT_GERER_SESSIONS()) { zone.innerHTML = ''; return; }
+
+  const groupes = detecterDoublonsSessions(window.__sessionsToutes || []);
+  window.__groupesDoublonsSessions = groupes;
+
+  if (!groupes.length) { zone.innerHTML = ''; return; }
+
+  zone.innerHTML = `
+    <div class="carte" style="border-color:#eda100;background:#fff9ec;">
+      <h3 style="margin-top:0;">Doublons de sessions détectés (${groupes.length} groupe${groupes.length > 1 ? 's' : ''})</h3>
+      <p style="font-size:12px;color:#55636c;margin:0 0 10px;">
+        Même formation, mêmes dates, même lieu et même(s) client(s) — probablement le même import rejoué deux fois. Choisis la fiche à conserver dans chaque groupe avant de fusionner ; rien n'est fusionné automatiquement. La fusion reporte sur la fiche conservée les stagiaires inscrits, les clients rattachés, les documents générés et les envois email des fiches fusionnées, puis supprime ces dernières.
+      </p>
+      ${groupes.map((g, gi) => sesRendreGroupeDoublon(g, gi)).join('')}
+    </div>`;
+}
+
+function sesRendreGroupeDoublon(groupe, gi) {
+  // Par défaut : la session qui a le plus de stagiaires inscrits, puis la
+  // plus ancienne (created_at) — la plus probable d'être la "vraie" session.
+  const parDefaut = groupe.slice().sort((a, b) => {
+    if (b.__nbStagiaires !== a.__nbStagiaires) return b.__nbStagiaires - a.__nbStagiaires;
+    return (a.created_at || '').localeCompare(b.created_at || '');
+  })[0];
+
+  return `
+    <div style="border-top:1px solid #eee;padding-top:10px;margin-top:10px;">
+      <p style="font-size:13px;font-weight:600;margin:0 0 6px;">
+        ${esc(groupe[0].formations_catalogue?.denomination || 'Formation')} — ${formatDateFr(groupe[0].date_debut)}${groupe[0].lieu ? ' — ' + esc(groupe[0].lieu) : ''}
+      </p>
+      ${groupe.map(s => `
+        <label style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:13px;">
+          <input type="radio" name="ses-doublon-${gi}" value="${s.id}" style="width:auto;" ${s.id === parDefaut.id ? 'checked' : ''}>
+          <span>N° ${esc(s.numero_session || '—')} — ${esc((s.__nomsClients || []).join(', ') || 'sans client')} — ${s.__nbStagiaires} stagiaire(s) — statut : ${esc(s.statut)}</span>
+        </label>`).join('')}
+      <button class="bouton" style="padding:5px 10px;font-size:12px;margin-top:6px;" onclick="fusionnerGroupeSessions(${gi})">Fusionner ce groupe</button>
+    </div>`;
+}
+
+async function fusionnerGroupeSessions(gi) {
+  const groupe = (window.__groupesDoublonsSessions || [])[gi];
+  if (!groupe) { toast('Groupe introuvable — recharge la page.', 'erreur'); return; }
+  const survivant = document.querySelector(`input[name="ses-doublon-${gi}"]:checked`)?.value;
+  if (!survivant) { toast('Choisis la session à conserver.', 'erreur'); return; }
+  const doublons = groupe.map(s => s.id).filter(id => id !== survivant);
+  if (!confirm(`Fusionner ${doublons.length} session(s) dans la session conservée ? Les stagiaires, clients, documents et envois des sessions fusionnées seront reportés sur la session conservée, puis ces sessions seront supprimées. Cette action est irréversible.`)) return;
+
+  const { error } = await supa.rpc('fusionner_sessions', { p_survivant: survivant, p_doublons: doublons });
+  if (error) { DEBUG.erreur('fusionnerGroupeSessions', error); toast('Erreur : ' + error.message, 'erreur'); return; }
+  toast('Sessions fusionnées.');
   ecranSessions($('#vue'));
 }
 

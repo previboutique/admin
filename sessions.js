@@ -916,6 +916,13 @@ function ouvrirConfirmationSuppression(sessionId, nbStagiaires) {
 }
 
 function rendreParticipants(session, participants) {
+  // Mémorisés tout de suite (avant le retour anticipé ci-dessous) : les
+  // boutons Convention/Convocation/AFF/Certificat de l'écran s'appuient sur
+  // window.__sessionCourante et window.__participantsCourants même quand la
+  // session n'a encore aucun stagiaire inscrit.
+  window.__participantsCourants = participants;
+  window.__sessionCourante = session;
+
   const zone = $('#participants-liste');
   if (participants.length === 0) { zone.innerHTML = '<p style="color:#55636c;">Aucun stagiaire inscrit.</p>'; return; }
 
@@ -943,10 +950,6 @@ function rendreParticipants(session, participants) {
       toast('Statut mis à jour.');
     };
   });
-
-  // Garder en mémoire pour les toggles FISE/évaluation
-  window.__participantsCourants = participants;
-  window.__sessionCourante = session;
 }
 
 function toggleFise(participantId) {

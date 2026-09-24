@@ -486,9 +486,13 @@ function genererFeuillePresence(session, participants, sansTelechargement) {
   doc.text('Feuille de Présence', largeurPage / 2, y, { align: 'center' }); y += 10;
 
   doc.setFontSize(10.5);
+  // Décalage calculé sur le libellé le plus long ("Durée de la session :")
+  // pour que la valeur ne le chevauche jamais, quel que soit le libellé.
+  doc.setFont('helvetica', 'bold');
+  const decalageValeur = doc.getTextWidth('Durée de la session :') + 4;
   const ligneInfo = (libelle, valeur) => {
     doc.setFont('helvetica', 'bold'); doc.text(libelle, MARGE, y);
-    doc.setFont('helvetica', 'normal'); doc.text(valeur || '—', MARGE + 28, y);
+    doc.setFont('helvetica', 'normal'); doc.text(valeur || '—', MARGE + decalageValeur, y);
     y += 6;
   };
   ligneInfo('Entreprise :', nomsClients.join(', '));

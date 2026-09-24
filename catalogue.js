@@ -64,6 +64,31 @@ async function chargerCatalogue() {
     </table>`).join('');
 }
 
+// Recopie le contenu pédagogique d'une autre formation du catalogue dans le
+// formulaire en cours (ne touche ni code, ni catégorie, ni dénomination, ni
+// tarifs, ni durée — un recyclage a souvent une durée différente de sa
+// formation initiale même quand les compétences visées sont identiques).
+// Purement côté formulaire : rien n'est enregistré tant que l'utilisateur ne
+// clique pas sur "Enregistrer".
+function copierContenuPedagogique() {
+  const id = $('#cf-copier-source').value;
+  if (!id) return;
+  const source = (window.__catalogueCourant || []).find(x => x.id === id);
+  if (!source) return;
+
+  $('#cf-objectifs').value = source.objectifs || '';
+  $('#cf-programme').value = source.programme_methode || '';
+  $('#cf-evaluation').value = source.evaluation || '';
+  $('#cf-consignes').value = source.consignes_convocation || '';
+  $('#cf-conditions').value = jsonbVersLignes(source.conditions_realisation);
+  $('#cf-rappel-competences').value = source.rappel_competences || '';
+  $('#cf-competences').value = jsonbVersLignes(source.competences);
+  $('#cf-pedagogie').value = jsonbVersLignes(source.pedagogie);
+  $('#cf-materiel').value = jsonbVersLignes(source.materiel);
+
+  toast('Contenu pédagogique copié — vérifie puis clique sur Enregistrer.');
+}
+
 function ouvrirFormFormation(id) {
   const f = id ? window.__catalogueCourant.find(x => x.id === id) : null;
   const autres = window.__catalogueCourant.filter(x => x.id !== id);
@@ -120,6 +145,18 @@ function ouvrirFormFormation(id) {
         <option value="">— elle-même / non défini —</option>
         ${autres.map(a => `<option value="${a.id}" ${f && f.formation_recyclage_id === a.id ? 'selected' : ''}>${esc(a.denomination)} (${esc(a.code)})</option>`).join('')}
       </select>
+
+      <div style="display:flex;gap:8px;align-items:flex-end;margin-top:12px;padding-top:10px;border-top:1px solid #eee;">
+        <div style="flex:1;">
+          <label for="cf-copier-source">Copier le contenu pédagogique depuis une autre formation</label>
+          <select id="cf-copier-source">
+            <option value="">— Choisir une formation —</option>
+            ${autres.map(a => `<option value="${a.id}">${esc(a.denomination)} (${esc(a.code)})</option>`).join('')}
+          </select>
+        </div>
+        <button class="bouton" type="button" style="background:#eee;color:#333;padding:8px 14px;" onclick="copierContenuPedagogique()">Copier</button>
+      </div>
+      <p style="font-size:12px;color:#55636c;margin:2px 0 12px;">Remplit Objectifs, Programme, Évaluation, Consignes, Conditions, Rappel des compétences, Compétences visées, Moyens pédagogiques et Matériel depuis la formation choisie (utile pour un recyclage qui reprend les mêmes compétences que sa formation initiale) — relis avant d'Enregistrer, rien n'est copié tant que tu n'as pas cliqué.</p>
 
       <label for="cf-objectifs">Objectifs</label>
       <textarea id="cf-objectifs" rows="3">${f ? esc(f.objectifs) : ''}</textarea>

@@ -35,10 +35,15 @@ function ajouterPiedDePage(doc) {
   const pages = doc.internal.getNumberOfPages();
   for (let i = 1; i <= pages; i++) {
     doc.setPage(i);
+    // Centré et positionné en fonction du format réel de la page (portrait
+    // 210×297 ou paysage 297×210, comme la Feuille d'émargement) : un pied
+    // de page calé sur des coordonnées portrait disparaissait hors-page sur
+    // les documents en paysage.
+    const { width, height } = doc.internal.pageSize;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.5);
     doc.setTextColor(90, 90, 90);
-    doc.text(piedDePageTexte(), 105, 289, { align: 'center' });
+    doc.text(piedDePageTexte(), width / 2, height - 8, { align: 'center' });
   }
 }
 
@@ -342,8 +347,10 @@ function genererConvention(session, participants, sansTelechargement, clientEntr
     `déclaration d'activité ${S.organisation.numero_declaration_activite || ''} auprès de la préfecture compétente,`, y, { apres: 3 });
   y = paragraphe(doc, 'et', y, { apres: 3 });
   y = paragraphe(doc,
-    `${client?.raison_sociale || '[Client à préciser]'} domiciliée à ${client?.ville || ''} est conclue la convention suivante, ` +
-    "en application des dispositions du Livre III de la Sixième partie du code du travail portant organisation de la formation professionnelle continue.",
+    `${client?.raison_sociale || '[Client à préciser]'}, domiciliée à ${client?.ville || ''},`, y, { apres: 3 });
+  y = paragraphe(doc,
+    "il est convenu et arrêté ce qui suit, en application des dispositions du Livre III de la Sixième partie du " +
+    'code du travail portant organisation de la formation professionnelle continue.',
     y, { apres: 6 });
 
   y = paragraphe(doc, 'Article 1er : Objet de la convention', y, { gras: true, apres: 2 });
@@ -452,10 +459,17 @@ function genererFeuillePresence(session, participants, sansTelechargement) {
   doc.text(`${f?.denomination || ''} — ${formatPlageDatesLongue(session.date_debut, session.date_fin)} — ${session.lieu || ''}${nomsClients.length ? ' — ' + nomsClients.join(', ') : ''}`, 148, y, { align: 'center' });
   y += 10;
 
+  // Complète avec des lignes vierges (jusqu'à un minimum de 15) pour que la
+  // feuille reste utilisable à l'impression même si tous les stagiaires
+  // n'ont pas encore été saisis dans l'appli au moment de l'impression.
+  const MINIMUM_LIGNES = 15;
+  const lignesStagiaires = (participants || []).map(p => [p.stagiaires?.nom || '', p.stagiaires?.prenom || '', p.clients?.raison_sociale || '', '', '']);
+  const lignesVierges = Array.from({ length: Math.max(0, MINIMUM_LIGNES - lignesStagiaires.length) }, () => ['', '', '', '', '']);
+
   doc.autoTable({
     startY: y,
     head: [['Nom', 'Prénom', 'Entreprise', 'Signature matin', 'Signature après-midi']],
-    body: (participants || []).map(p => [p.stagiaires?.nom || '', p.stagiaires?.prenom || '', p.clients?.raison_sociale || '', '', '']),
+    body: [...lignesStagiaires, ...lignesVierges],
     styles: { fontSize: 11, cellPadding: 4, minCellHeight: 14 },
     headStyles: { fillColor: [10, 92, 138] },
   });

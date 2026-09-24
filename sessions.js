@@ -492,6 +492,27 @@ async function ecranNouvelleSession(vue) {
         </div>
       </div>
 
+      <label style="margin-top:14px;">Horaires</label>
+      <p style="font-size:12px;color:#55636c;margin:2px 0 8px;">Facultatif — repris automatiquement sur la Convention et la Convocation.</p>
+      <div style="display:flex;gap:10px;">
+        <div style="flex:1;">
+          <label for="ns-heure-debut" style="font-weight:normal;font-size:12px;">Début</label>
+          <input id="ns-heure-debut" type="time">
+        </div>
+        <div style="flex:1;">
+          <label for="ns-pause-debut" style="font-weight:normal;font-size:12px;">Pause déjeuner de</label>
+          <input id="ns-pause-debut" type="time">
+        </div>
+        <div style="flex:1;">
+          <label for="ns-pause-fin" style="font-weight:normal;font-size:12px;">à</label>
+          <input id="ns-pause-fin" type="time">
+        </div>
+        <div style="flex:1;">
+          <label for="ns-heure-fin" style="font-weight:normal;font-size:12px;">Fin</label>
+          <input id="ns-heure-fin" type="time">
+        </div>
+      </div>
+
       <label style="margin-top:14px;">Client(s) de la session</label>
       <p style="font-size:12px;color:#55636c;margin:2px 0 8px;">Une session peut réunir plusieurs entreprises (formation mutualisée) — chacune avec son propre tarif, pré-rempli depuis le catalogue mais modifiable.</p>
       <div id="ns-clients-lignes"></div>
@@ -572,6 +593,17 @@ async function ecranNouvelleSession(vue) {
     const lignesClients = lireLignesClientSession();
     if (lignesClients.erreur) { $('#ns-erreur').textContent = lignesClients.erreur; return; }
 
+    // Un seul jeu d'horaires pour toute la session (Convention/Convocation
+    // n'affichent que le premier élément du tableau) — non stocké du tout si
+    // rien n'a été renseigné.
+    const heureDebut = $('#ns-heure-debut').value;
+    const pauseDebut = $('#ns-pause-debut').value;
+    const pauseFin = $('#ns-pause-fin').value;
+    const heureFin = $('#ns-heure-fin').value;
+    const horaires = (heureDebut || pauseDebut || pauseFin || heureFin)
+      ? [{ debut: heureDebut || null, pause_debut: pauseDebut || null, pause_fin: pauseFin || null, fin: heureFin || null }]
+      : [];
+
     const premier = lignesClients.valides[0];
     const { data, error } = await supa.from('sessions_formation').insert({
       organisation_id: S.organisation.id,
@@ -580,6 +612,7 @@ async function ecranNouvelleSession(vue) {
       lieu: lieu || null,
       date_debut: dateDebut,
       date_fin: dateFin,
+      horaires,
       prix_unitaire: premier ? premier.prix : null,
       modalite: $('#ns-modalite').value,
       origine_financement: origineFinancement,

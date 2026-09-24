@@ -218,17 +218,25 @@ function genererAFF(session, participant, sansTelechargement) {
     ? participant.grille_certification
     : (f?.competences || []).map(c => ({ libelle: c.libelle, acquis: null }));
 
+  // Ancien format (avant l'échelle à 3 niveaux) : acquis était un booléen —
+  // true = Acquis, false = Reste à acquérir. Converti à la volée pour rester
+  // compatible avec les évaluations déjà enregistrées.
+  const graderCompat = a => a === true ? 'acquis' : a === false ? 'non_acquis' : a;
+
   doc.autoTable({
     startY: y,
-    head: [['Compétences visées', 'Acquise', 'Reste à acquérir']],
-    body: grille.map(c => [c.libelle, c.acquis === true ? 'X' : '', c.acquis === false ? 'X' : '']),
+    head: [['Compétences visées', 'Acquis (A)', 'En cours d\'acquisition (ECA)', 'Non acquis (NA)']],
+    body: grille.map(c => {
+      const grade = graderCompat(c.acquis);
+      return [c.libelle, grade === 'acquis' ? 'X' : '', grade === 'eca' ? 'X' : '', grade === 'non_acquis' ? 'X' : ''];
+    }),
     styles: { fontSize: 9.5, cellPadding: 2 },
     headStyles: { fillColor: [10, 92, 138] },
-    columnStyles: { 1: { halign: 'center', cellWidth: 22 }, 2: { halign: 'center', cellWidth: 30 } },
+    columnStyles: { 1: { halign: 'center', cellWidth: 22 }, 2: { halign: 'center', cellWidth: 30 }, 3: { halign: 'center', cellWidth: 26 } },
   });
   y = doc.lastAutoTable.finalY + 8;
 
-  const toutAcquis = grille.length > 0 && grille.every(c => c.acquis === true);
+  const toutAcquis = grille.length > 0 && grille.every(c => graderCompat(c.acquis) === 'acquis');
   y = paragraphe(doc, toutAcquis
     ? "a validé l'ensemble des compétences visées par la formation."
     : "a validé les compétences visées par la formation indiquées ci-dessus.", y, { apres: 8 });

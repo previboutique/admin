@@ -993,6 +993,17 @@ function rendreParticipants(session, participants) {
   });
 }
 
+// Échelle à 3 niveaux pour la grille de certification FISE (utilisée sur
+// l'AFF). Remplace l'ancienne échelle à 2 niveaux (Acquise/Reste à
+// acquérir, stockée en booléen) — GRADE_COMPAT convertit à la volée les
+// grilles déjà enregistrées dans l'ancien format.
+const GRADES_FISE = [
+  { valeur: 'acquis', libelle: 'A' },
+  { valeur: 'eca', libelle: 'ECA' },
+  { valeur: 'non_acquis', libelle: 'NA' },
+];
+const gradeFiseCompat = a => a === true ? 'acquis' : a === false ? 'non_acquis' : a;
+
 function toggleFise(participantId) {
   const zone = $('#fise-' + participantId);
   const visible = zone.style.display !== 'none';
@@ -1006,15 +1017,17 @@ function toggleFise(participantId) {
 
   zone.innerHTML = `
     <div style="border-top:1px solid #e0e0e0;padding-top:10px;">
-      <p style="font-size:12px;color:#55636c;margin:0 0 8px;">FISE — compétences visées par la formation, résultat à l'issue de l'évaluation.</p>
+      <p style="font-size:12px;color:#55636c;margin:0 0 8px;">FISE — compétences visées par la formation. A = Acquis, ECA = En cours d'acquisition, NA = Non acquis.</p>
       ${grille.map((c, i) => `
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 0;font-size:13px;">
           <span style="flex:1;">${esc(c.libelle)}</span>
-          <select data-idx="${i}" class="fise-champ">
-            <option value="">—</option>
-            <option value="acquis" ${c.acquis === true ? 'selected' : ''}>Acquise</option>
-            <option value="reste" ${c.acquis === false ? 'selected' : ''}>Reste à acquérir</option>
-          </select>
+          <div style="display:flex;gap:12px;">
+            ${GRADES_FISE.map(g => `
+              <label style="display:flex;align-items:center;gap:4px;font-weight:normal;">
+                <input type="radio" name="fise-grade-${i}" class="fise-champ" data-idx="${i}" value="${g.valeur}" style="width:auto;" ${gradeFiseCompat(c.acquis) === g.valeur ? 'checked' : ''}>
+                ${g.libelle}
+              </label>`).join('')}
+          </div>
         </div>`).join('')}
       <button class="bouton" style="margin-top:10px;padding:6px 12px;font-size:13px;" onclick="enregistrerFise('${participantId}')">Enregistrer</button>
     </div>`;
@@ -1025,9 +1038,9 @@ function toggleFise(participantId) {
 async function enregistrerFise(participantId) {
   const zone = $('#fise-' + participantId);
   const grille = JSON.parse(zone.dataset.grille);
-  $$('.fise-champ', zone).forEach(sel => {
-    const i = Number(sel.dataset.idx);
-    grille[i].acquis = sel.value === 'acquis' ? true : sel.value === 'reste' ? false : null;
+  $$('.fise-champ:checked', zone).forEach(input => {
+    const i = Number(input.dataset.idx);
+    grille[i].acquis = input.value;
   });
   const { error } = await supa.from('session_participants').update({ grille_certification: grille }).eq('id', participantId);
   if (error) { DEBUG.erreur('enregistrerFise', error); toast('Erreur : ' + error.message, 'erreur'); return; }

@@ -136,6 +136,9 @@ function ouvrirFormFormation(id) {
       <label for="cf-conditions">Conditions de réalisation (une par ligne)</label>
       <textarea id="cf-conditions" rows="2">${f ? esc(jsonbVersLignes(f.conditions_realisation)) : ''}</textarea>
 
+      <label for="cf-rappel-competences">Rappel des compétences (paragraphe affiché sur l'Attestation de fin de formation)</label>
+      <textarea id="cf-rappel-competences" rows="3">${f ? esc(f.rappel_competences) : ''}</textarea>
+
       <label for="cf-competences">Compétences visées / FISE (une par ligne)</label>
       <textarea id="cf-competences" rows="4">${f ? esc(jsonbVersLignes(f.competences)) : ''}</textarea>
 
@@ -175,6 +178,7 @@ function ouvrirFormFormation(id) {
       programme_methode: $('#cf-programme').value.trim() || null,
       evaluation: $('#cf-evaluation').value.trim() || null,
       consignes_convocation: $('#cf-consignes').value.trim() || null,
+      rappel_competences: $('#cf-rappel-competences').value.trim() || null,
       conditions_realisation: lignesVersJsonb($('#cf-conditions').value),
       competences: lignesVersCompetences($('#cf-competences').value),
       pedagogie: lignesVersJsonb($('#cf-pedagogie').value),

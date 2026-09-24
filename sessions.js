@@ -710,6 +710,14 @@ async function ouvrirSession(id) {
   window.__sessionClients = sessionClients || [];
   const nomsClients = (sessionClients || []).map(sc => sc.clients?.raison_sociale).filter(Boolean);
 
+  // Nom du formateur réellement assigné à la session (pas celui qui génère
+  // le document) — utilisé comme signataire sur l'AFF, le Certificat de
+  // réalisation et la Feuille de présence. Repli sur le représentant de
+  // l'organisme si non trouvé (ex. formateur sans droits de gestion, la
+  // liste n'est alors pas chargée).
+  const formateurAssigne = (formateursDisponibles || []).find(f => f.id === session.formateur_id);
+  session.__formateurNom = formateurAssigne ? `${formateurAssigne.prenom} ${formateurAssigne.nom}` : null;
+
   vue.innerHTML = `
     <div class="carte" style="display:flex;justify-content:space-between;align-items:flex-start;">
       <div>

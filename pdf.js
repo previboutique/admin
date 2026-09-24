@@ -438,13 +438,39 @@ function genererConvention(session, participants, sansTelechargement, clientEntr
   return telechargerOuOuvrir(doc, nomFichierDoc('Convention', session, null, client?.raison_sociale), sansTelechargement);
 }
 
+// Liste des dates couvertes par une session (un élément par jour calendaire
+// entre date_debut et date_fin inclus). Plafonnée à 10 jours par sécurité —
+// aucune session réelle ne dépasse cette durée.
+function joursDeLaSession(session) {
+  if (!session.date_debut) return [];
+  const jours = [];
+  const debut = new Date(session.date_debut + 'T00:00:00');
+  const fin = session.date_fin ? new Date(session.date_fin + 'T00:00:00') : debut;
+  for (let d = new Date(debut); d <= fin && jours.length < 10; d.setDate(d.getDate() + 1)) {
+    jours.push(new Date(d));
+  }
+  return jours.length ? jours : [debut];
+}
+
+function formatDateCourte(d) {
+  return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+}
+
 // ============================================================================
-// FEUILLE D'ÉMARGEMENT — un document par session
-// ⚠️ Pas d'exemple exploitable dans le classeur (version scannée uniquement) :
-// mise en page originale, à valider/ajuster avec Jérémy.
+// FEUILLE DE PRÉSENCE — un document par session
+// Mise en page reprise du vrai gabarit Excel retrouvé dans les archives de
+// Jérémy (dossier "ressource" — sessions de novembre 2024) : en-tête
+// Entreprise/Adresse/Formation/Durée, une colonne "Date et lieu de
+// naissance", et une paire de colonnes Matin/Après-midi PAR JOUR de la
+// session (J1, J2, J3...) pour couvrir les formations sur plusieurs jours.
+// Au-delà de 3 jours, la page bascule automatiquement en paysage pour que
+// les colonnes journalières restent lisibles.
 // ============================================================================
 function genererFeuillePresence(session, participants, sansTelechargement) {
-  const doc = new jsPDF({ orientation: 'landscape' });
+  const jours = joursDeLaSession(session);
+  const paysage = jours.length > 3;
+  const doc = new jsPDF(paysage ? { orientation: 'landscape' } : undefined);
+  const largeurPage = doc.internal.pageSize.width;
   ajouterLogoEnTete(doc);
   const f = session.formations_catalogue;
   let y = 18;
@@ -452,26 +478,62 @@ function genererFeuillePresence(session, participants, sansTelechargement) {
   // Chaque stagiaire affiche sa propre entreprise (une session peut réunir
   // plusieurs clients) ; l'en-tête liste les entreprises distinctes.
   const nomsClients = Array.from(new Set((participants || []).map(p => p.clients?.raison_sociale).filter(Boolean)));
+  const adresse = [session.lieu, session.adresse, [session.code_postal, session.ville].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  const horaires = (session.horaires && session.horaires[0]) || {};
+  const formateurNom = session.__formateurNom || S.organisation.representant_nom || `${S.profil.prenom} ${S.profil.nom}`;
 
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(13);
-  doc.text("FEUILLE D'ÉMARGEMENT", 148, y, { align: 'center' }); y += 8;
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
-  doc.text(`${f?.denomination || ''} — ${formatPlageDatesLongue(session.date_debut, session.date_fin)} — ${session.lieu || ''}${nomsClients.length ? ' — ' + nomsClients.join(', ') : ''}`, 148, y, { align: 'center' });
-  y += 10;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(15);
+  doc.text('Feuille de Présence', largeurPage / 2, y, { align: 'center' }); y += 10;
+
+  doc.setFontSize(10.5);
+  const ligneInfo = (libelle, valeur) => {
+    doc.setFont('helvetica', 'bold'); doc.text(libelle, MARGE, y);
+    doc.setFont('helvetica', 'normal'); doc.text(valeur || '—', MARGE + 28, y);
+    y += 6;
+  };
+  ligneInfo('Entreprise :', nomsClients.join(', '));
+  ligneInfo('Adresse :', adresse);
+  ligneInfo('Formation :', f?.denomination || '');
+  ligneInfo('En date du :', formatPlageDatesLongue(session.date_debut, session.date_fin));
+  ligneInfo('De :', `${horaires.debut || '—'} à ${horaires.pause_debut || '—'} et de ${horaires.pause_fin || '—'} à ${horaires.fin || '—'}`);
+  ligneInfo('Durée de la session :', `${f?.duree_heures || '—'} heures`);
+  y += 2;
 
   // Complète avec des lignes vierges (jusqu'à un minimum de 15) pour que la
   // feuille reste utilisable à l'impression même si tous les stagiaires
   // n'ont pas encore été saisis dans l'appli au moment de l'impression.
   const MINIMUM_LIGNES = 15;
-  const lignesStagiaires = (participants || []).map(p => [p.stagiaires?.nom || '', p.stagiaires?.prenom || '', p.clients?.raison_sociale || '', '', '']);
-  const lignesVierges = Array.from({ length: Math.max(0, MINIMUM_LIGNES - lignesStagiaires.length) }, () => ['', '', '', '', '']);
+  const dateEtLieuNaissance = st => st?.date_naissance ? formatDateLongue(st.date_naissance) : '';
+  const lignesStagiaires = (participants || []).map(p => [
+    `${p.stagiaires?.nom || ''} ${p.stagiaires?.prenom || ''}`.trim(),
+    dateEtLieuNaissance(p.stagiaires),
+    ...jours.flatMap(() => ['', '']),
+  ]);
+  const ligneVierge = () => ['', '', ...jours.flatMap(() => ['', ''])];
+  const lignesVierges = Array.from({ length: Math.max(0, MINIMUM_LIGNES - lignesStagiaires.length) }, ligneVierge);
 
   doc.autoTable({
     startY: y,
-    head: [['Nom', 'Prénom', 'Entreprise', 'Signature matin', 'Signature après-midi']],
+    head: [
+      [
+        { content: 'NOM et Prénom', rowSpan: 2, styles: { valign: 'middle' } },
+        { content: 'Date et lieu de naissance', rowSpan: 2, styles: { valign: 'middle' } },
+        ...jours.map((j, i) => ({ content: `J${i + 1} — ${formatDateCourte(j)}`, colSpan: 2, styles: { halign: 'center' } })),
+      ],
+      jours.flatMap(() => ['Matin', 'Après-m.']),
+    ],
     body: [...lignesStagiaires, ...lignesVierges],
-    styles: { fontSize: 11, cellPadding: 4, minCellHeight: 14 },
-    headStyles: { fillColor: [10, 92, 138] },
+    styles: { fontSize: 8.5, cellPadding: 2, minCellHeight: 9 },
+    headStyles: { fillColor: [10, 92, 138], fontSize: 8.5 },
+    columnStyles: { 0: { cellWidth: 38 }, 1: { cellWidth: 30 } },
+  });
+  y = doc.lastAutoTable.finalY + 4;
+
+  doc.autoTable({
+    startY: y,
+    body: [[`Formateur : ${formateurNom}`, '']],
+    styles: { fontSize: 10, cellPadding: 3, minCellHeight: 14 },
+    columnStyles: { 0: { cellWidth: 68 }, 1: { cellWidth: (largeurPage - MARGE * 2) - 68 } },
   });
 
   return telechargerOuOuvrir(doc, nomFichierDoc('Feuille de presence', session, null), sansTelechargement);

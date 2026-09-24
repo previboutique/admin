@@ -178,6 +178,9 @@ function rendreEcranConnexion() {
       <label for="ci-mdp">Mot de passe</label>
       <input id="ci-mdp" type="password" autocomplete="current-password">
       <button class="bouton" id="ci-valider" style="margin-top:16px;width:100%;">Se connecter</button>
+      <p style="text-align:center;margin-top:12px;">
+        <a href="#" id="ci-mdp-oublie" style="font-size:13px;color:#0a5c8a;">Mot de passe oublié ?</a>
+      </p>
       <div class="erreur" id="ci-erreur"></div>
     </div>`;
   $('#ci-valider').onclick = async () => {
@@ -186,6 +189,112 @@ function rendreEcranConnexion() {
     const { error } = await supa.auth.signInWithPassword({ email, password: mdp });
     if (error) { $('#ci-erreur').textContent = 'Connexion refusée : ' + error.message; return; }
     await demarrer();
+  };
+  $('#ci-mdp-oublie').onclick = (e) => { e.preventDefault(); rendreEcranMotDePasseOublie(); };
+}
+
+// Demande l'envoi d'un email de réinitialisation (lien Supabase Auth, valable
+// une fois) — accessible depuis l'écran de connexion sans être authentifié.
+function rendreEcranMotDePasseOublie() {
+  const vue = $('#vue');
+  vue.innerHTML = `
+    <div class="carte" style="max-width:360px;margin:60px auto;">
+      <h2 style="margin-top:0;font-size:18px;">Mot de passe oublié</h2>
+      <p style="font-size:13px;color:#55636c;margin-top:-6px;">Renseigne ton email de connexion : un lien pour choisir un nouveau mot de passe va t'être envoyé.</p>
+      <label for="mo-email">Email</label>
+      <input id="mo-email" type="email" autocomplete="username">
+      <button class="bouton" id="mo-valider" style="margin-top:16px;width:100%;">Envoyer le lien</button>
+      <p style="text-align:center;margin-top:12px;">
+        <a href="#" id="mo-retour" style="font-size:13px;color:#0a5c8a;">Retour à la connexion</a>
+      </p>
+      <div class="erreur" id="mo-erreur"></div>
+      <div id="mo-resultat"></div>
+    </div>`;
+  $('#mo-retour').onclick = (e) => { e.preventDefault(); rendreEcranConnexion(); };
+  $('#mo-valider').onclick = async () => {
+    const email = $('#mo-email').value.trim();
+    if (!email) { $('#mo-erreur').textContent = 'Email obligatoire.'; return; }
+    $('#mo-erreur').textContent = '';
+    const bouton = $('#mo-valider');
+    bouton.disabled = true;
+    // Retire un éventuel fragment #... résiduel de l'URL courante, pour que
+    // le lien reçu par email ramène proprement sur l'écran de connexion.
+    const urlRetour = window.location.href.split('#')[0];
+    const { error } = await supa.auth.resetPasswordForEmail(email, { redirectTo: urlRetour });
+    bouton.disabled = false;
+    if (error) { $('#mo-erreur').textContent = 'Erreur : ' + error.message; return; }
+    $('#mo-resultat').innerHTML = '<p style="font-size:13px;color:#0a5c8a;margin-top:10px;">Si cet email correspond à un compte, un lien de réinitialisation vient d\'être envoyé — pense à vérifier les spams.</p>';
+  };
+}
+
+// Écran affiché quand Supabase détecte un lien de réinitialisation dans
+// l'URL (événement d'auth PASSWORD_RECOVERY, voir onAuthStateChange
+// ci-dessous) — permet de choisir un nouveau mot de passe sans connaître
+// l'ancien.
+function rendreEcranNouveauMotDePasse() {
+  const vue = $('#vue');
+  $('#onglets').innerHTML = '';
+  $('#menu-lateral').innerHTML = '';
+  vue.innerHTML = `
+    <div class="carte" style="max-width:360px;margin:60px auto;">
+      <h2 style="margin-top:0;font-size:18px;">Choisir un nouveau mot de passe</h2>
+      <label for="np-mdp">Nouveau mot de passe</label>
+      <input id="np-mdp" type="password" autocomplete="new-password">
+      <label for="np-mdp2">Confirmer le mot de passe</label>
+      <input id="np-mdp2" type="password" autocomplete="new-password">
+      <p style="font-size:12px;color:#55636c;margin:4px 0 0;">Au moins 8 caractères.</p>
+      <button class="bouton" id="np-valider" style="margin-top:16px;width:100%;">Valider</button>
+      <div class="erreur" id="np-erreur"></div>
+    </div>`;
+  $('#np-valider').onclick = async () => {
+    const mdp = $('#np-mdp').value;
+    const mdp2 = $('#np-mdp2').value;
+    if (mdp.length < 8) { $('#np-erreur').textContent = 'Le mot de passe doit faire au moins 8 caractères.'; return; }
+    if (mdp !== mdp2) { $('#np-erreur').textContent = 'Les deux mots de passe ne correspondent pas.'; return; }
+    const bouton = $('#np-valider');
+    bouton.disabled = true;
+    const { error } = await supa.auth.updateUser({ password: mdp });
+    bouton.disabled = false;
+    if (error) { $('#np-erreur').textContent = 'Erreur : ' + error.message; return; }
+    toast('Mot de passe mis à jour.');
+    // Nettoie le fragment #access_token=... de l'URL avant de continuer.
+    history.replaceState(null, '', window.location.pathname + window.location.search);
+    await demarrer();
+  };
+}
+
+// Changement de mot de passe volontaire pour un utilisateur déjà connecté
+// (bouton "Mot de passe" dans l'en-tête, voir demarrer() ci-dessous).
+function ouvrirChangementMotDePasse() {
+  const vue = $('#vue');
+  const ongletPrecedent = S.ongletActif;
+  vue.innerHTML = `
+    <div class="carte" style="max-width:420px;">
+      <h3 style="margin-top:0;">Changer mon mot de passe</h3>
+      <label for="cm-mdp">Nouveau mot de passe</label>
+      <input id="cm-mdp" type="password" autocomplete="new-password">
+      <label for="cm-mdp2">Confirmer le mot de passe</label>
+      <input id="cm-mdp2" type="password" autocomplete="new-password">
+      <p style="font-size:12px;color:#55636c;margin:4px 0 0;">Au moins 8 caractères.</p>
+      <div style="margin-top:14px;">
+        <button class="bouton" id="cm-valider">Valider</button>
+        <button class="bouton" style="background:#eee;color:#333;margin-left:8px;" id="cm-annuler">Annuler</button>
+      </div>
+      <div class="erreur" id="cm-erreur"></div>
+    </div>`;
+  $('#cm-annuler').onclick = () => allerA(ongletPrecedent || 'accueil');
+  $('#cm-valider').onclick = async () => {
+    const mdp = $('#cm-mdp').value;
+    const mdp2 = $('#cm-mdp2').value;
+    if (mdp.length < 8) { $('#cm-erreur').textContent = 'Le mot de passe doit faire au moins 8 caractères.'; return; }
+    if (mdp !== mdp2) { $('#cm-erreur').textContent = 'Les deux mots de passe ne correspondent pas.'; return; }
+    const bouton = $('#cm-valider');
+    bouton.disabled = true;
+    const { error } = await supa.auth.updateUser({ password: mdp });
+    bouton.disabled = false;
+    if (error) { $('#cm-erreur').textContent = 'Erreur : ' + error.message; return; }
+    toast('Mot de passe mis à jour.');
+    allerA(ongletPrecedent || 'accueil');
   };
 }
 
@@ -203,8 +312,10 @@ async function demarrer() {
 
   $('#zone-utilisateur').innerHTML = `
     <span style="font-size:13px;margin-right:12px;">${esc(S.profil.prenom || '')} ${esc(S.profil.nom || '')}</span>
+    <button class="bouton" style="background:#fff2;padding:6px 12px;margin-right:6px;" id="btn-changer-mdp">Mot de passe</button>
     <button class="bouton" style="background:#fff2;padding:6px 12px;" id="btn-deconnexion">Déconnexion</button>`;
   $('#btn-deconnexion').onclick = deconnexion;
+  $('#btn-changer-mdp').onclick = ouvrirChangementMotDePasse;
 
   const categories = categoriesPourRole(S.vision);
   if (categories[0]) allerACategorie(categories[0].id);
@@ -212,6 +323,10 @@ async function demarrer() {
 
 supa.auth.onAuthStateChange((event) => {
   if (event === 'SIGNED_OUT') rendreEcranConnexion();
+  // Déclenché par Supabase quand la page est ouverte via le lien reçu par
+  // email suite à "Mot de passe oublié" — affiche l'écran dédié plutôt que
+  // de laisser démarrer() ouvrir l'appli normalement.
+  if (event === 'PASSWORD_RECOVERY') rendreEcranNouveauMotDePasse();
 });
 
 document.addEventListener('DOMContentLoaded', demarrer);

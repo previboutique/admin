@@ -101,10 +101,10 @@ function ajouterLogoEnTete(doc) {
 // Signature du représentant + tampon de l'organisme, insérés côte à côte à
 // la position (x, y) — utilisés sur les documents qui portent une signature
 // (Convention, Certificat de réalisation).
-function ajouterSignatureEtTampon(doc, x, y) {
+function ajouterSignatureEtTampon(doc, x, y, tamponSeul) {
   const largeurMax = 35, hauteurMax = 20;
   let decalage = 0;
-  [S.organisation?._signatureDataUrl, S.organisation?._tamponDataUrl].forEach(image => {
+  [tamponSeul ? null : S.organisation?._signatureDataUrl, S.organisation?._tamponDataUrl].forEach(image => {
     if (!image) return;
     try {
       const proprietes = doc.getImageProperties(image);
@@ -244,7 +244,13 @@ function genererAFF(session, participant, sansTelechargement) {
   doc.text(`Fait à ${S.organisation.ville || ''}, le ${formatDateLongue(new Date().toISOString().slice(0, 10))}`, MARGE, y);
   doc.setFont('helvetica', 'bold');
   doc.text(formateurNom, 195, y, { align: 'right' });
-  y += 12;
+  y += 4;
+
+  // Tampon de l'organisme (la signature du représentant n'est pas reprise :
+  // l'AFF est signée par le formateur).
+  if (y + 36 > doc.internal.pageSize.getHeight() - 15) { doc.addPage(); y = 20; }
+  ajouterSignatureEtTampon(doc, 195, y, true);
+  y += 24;
 
   doc.setFont('helvetica', 'italic'); doc.setFontSize(8.5); doc.setTextColor(90, 90, 90);
   doc.text('Document à conserver par le/la stagiaire. Aucun duplicata ne sera délivré', 105, y, { align: 'center' });

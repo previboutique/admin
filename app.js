@@ -12,11 +12,11 @@
 window.CATEGORIES_MENU = {
   super_admin: [
     { id: 'accueil', libelle: 'Accueil', icone: '🏠', onglets: [['accueil', 'Accueil']] },
-    { id: 'administration', libelle: 'Administration', icone: '⚙️', onglets: [['organisations', 'Organisations']] },
+    { id: 'administration', libelle: 'Administration', icone: '⚙️', onglets: [['organisations', 'Organisations'], ['familles', 'Familles & codes']] },
   ],
   admin: [
     { id: 'accueil', libelle: 'Accueil', icone: '🏠', onglets: [['accueil', 'Accueil']] },
-    { id: 'activite', libelle: 'Activité formation', icone: '📚', onglets: [['activite-dashboard', 'Tableau de bord'], ['activite-synthese', 'Synthèse de session'], ['catalogue', 'Catalogue'], ['sessions', 'Sessions'], ['bpf', 'BPF']] },
+    { id: 'activite', libelle: 'Activité formation', icone: '📚', onglets: [['activite-dashboard', 'Tableau de bord'], ['activite-synthese', 'Synthèse de session'], ['catalogue', 'Catalogue'], ['familles', 'Familles & codes'], ['sessions', 'Sessions'], ['bpf', 'BPF']] },
     { id: 'contacts', libelle: 'Contacts', icone: '👥', onglets: [['clients', 'Clients'], ['stagiaires', 'Stagiaires']] },
     { id: 'intervenants', libelle: 'Intervenants', icone: '🎓', onglets: [['intervenants-dashboard', 'Tableau de bord'], ['formateurs', 'Formateurs'], ['soustraitants', 'Organismes sous-traitants']] },
     { id: 'administration', libelle: 'Administration', icone: '⚙️', onglets: [['organisation', 'Organisme'], ['import', 'Import']] },
@@ -39,6 +39,7 @@ window.DISPATCH_ONGLETS = {
   accueil: ecranAccueil,        // dashboard.js
   sessions: ecranSessions,      // sessions.js
   catalogue: ecranCatalogue,    // catalogue.js
+  familles: ecranFamilles,      // familles.js (codes Passeport de prévention)
   import: ecranImport,          // import_excel.js
   clients: ecranClients,        // clients.js
   soustraitants: ecranSousTraitants, // clients.js (clients de type organisme_formation)

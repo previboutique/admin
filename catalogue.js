@@ -37,6 +37,8 @@ async function chargerCatalogue() {
 
   if (error) { DEBUG.erreur('chargerCatalogue', error); zone.textContent = 'Erreur de chargement.'; return; }
   window.__catalogueCourant = data || [];
+  const { data: fam } = await supa.from('familles_formation').select('id, nom, fiabilite').eq('actif', true).order('nom');
+  window.__famillesCatalogue = fam || [];
 
   if (!data || data.length === 0) { zone.innerHTML = '<p style="color:#55636c;">Aucune formation au catalogue.</p>'; return; }
 
@@ -50,6 +52,7 @@ async function chargerCatalogue() {
         <tr style="border-top:1px solid #eee;${f.actif ? '' : 'opacity:.5;'}">
           <td style="padding:6px 8px;width:90px;color:#55636c;">${esc(f.code)}</td>
           <td style="padding:6px 8px;">${esc(f.denomination)}
+            ${f.famille_id ? `<div style="font-size:11px;color:#55636c;margin-top:2px;">Codes Passeport : ${esc((window.__famillesCatalogue.find(g => g.id === f.famille_id) || {}).nom || '—')}</div>` : (window.__famillesCatalogue.length ? '<div style="font-size:11px;color:#8a5a00;margin-top:2px;">Aucune famille de codes Passeport</div>' : '')}
             ${f.type_formation === 'recyclage'
               ? `<span style="font-size:11px;background:#e3f6ee;color:#1a7f3c;border-radius:10px;padding:1px 8px;margin-left:6px;">Recyclage${f.formation_initiale_id ? ' de ' + esc((data.find(x => x.id === f.formation_initiale_id) || {}).denomination || '?') : ' — initiale à définir'}</span>`
               : '<span style="font-size:11px;background:#e8f0fb;color:#2a78d6;border-radius:10px;padding:1px 8px;margin-left:6px;">Initiale</span>'}
@@ -170,6 +173,14 @@ function ouvrirFormFormation(id) {
         ${autres.map(a => `<option value="${a.id}" ${f && f.formation_recyclage_id === a.id ? 'selected' : ''}>${esc(a.denomination)} (${esc(a.code)})</option>`).join('')}
       </select>
 
+      ${(window.__famillesCatalogue || []).length ? `
+      <label for="cf-famille">Famille de codes Passeport de prévention (NSF, Formacode, ROME, RS)</label>
+      <select id="cf-famille">
+        <option value="">— aucune famille —</option>
+        ${window.__famillesCatalogue.map(g => `<option value="${g.id}" ${f && f.famille_id === g.id ? 'selected' : ''}>${esc(g.nom)}</option>`).join('')}
+      </select>
+      <p style="font-size:12px;color:#55636c;margin:2px 0 0;">Une formation et son recyclage (ex. SST et MAC SST) partagent la même famille : les codes se gèrent dans l'onglet « Familles &amp; codes ».</p>` : ''}
+
       <div style="display:flex;gap:8px;align-items:flex-end;margin-top:12px;padding-top:10px;border-top:1px solid #eee;">
         <div style="flex:1;">
           <label for="cf-copier-source">Copier le contenu pédagogique depuis une autre formation</label>
@@ -252,6 +263,8 @@ function ouvrirFormFormation(id) {
       materiel: lignesVersJsonb($('#cf-materiel').value),
       actif: $('#cf-actif').checked,
     };
+
+    if ($('#cf-famille')) payload.famille_id = $('#cf-famille').value || null;
 
     if (!payload.code || !payload.categorie || !payload.denomination) {
       $('#cf-erreur').textContent = 'Code, catégorie et dénomination sont obligatoires.';

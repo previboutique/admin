@@ -191,16 +191,24 @@ function rafraichirSyntheseSessions() {
   const formations = window.__ssFormations || [];
   const parId = Object.fromEntries(formations.map(f => [f.id, f]));
 
-  // Fiche recyclage -> fiche initiale. On part du lien « formation à programmer
-  // au recyclage » posé sur la fiche initiale (anciens réglages), puis la
-  // définition explicite du catalogue (type « recyclage » + formation initiale)
-  // a le dernier mot.
+  // Fiche recyclage -> fiche initiale.
+  // 1) Définition explicite du catalogue : type « recyclage » + formation initiale.
+  // 2) Repli sur l'ancien lien « formation à programmer au recyclage » (posé sur
+  //    la fiche initiale), SEULEMENT entre deux fiches « initiale » et sans lien
+  //    réciproque : un recyclage dont ce champ pointe vers sa propre formation
+  //    initiale (cas fréquent) ne doit pas inverser la relation.
   const initialDe = {};
   formations.forEach(f => {
-    if (f.formation_recyclage_id && f.formation_recyclage_id !== f.id && !initialDe[f.formation_recyclage_id]) initialDe[f.formation_recyclage_id] = f.id;
-  });
-  formations.forEach(f => {
     if (f.type_formation === 'recyclage' && f.formation_initiale_id) initialDe[f.id] = f.formation_initiale_id;
+  });
+  const aTypes = formations.some(f => 'type_formation' in f);
+  const parIdForm = Object.fromEntries(formations.map(f => [f.id, f]));
+  formations.forEach(f => {
+    const cible = f.formation_recyclage_id ? parIdForm[f.formation_recyclage_id] : null;
+    if (!cible || cible.id === f.id || initialDe[cible.id] || initialDe[f.id]) return;
+    const reciproque = cible.formation_recyclage_id === f.id;
+    const typesCompatibles = !aTypes || (f.type_formation !== 'recyclage' && cible.type_formation !== 'recyclage');
+    if (!reciproque && typesCompatibles) initialDe[cible.id] = f.id;
   });
   const estRecyclage = id => !!initialDe[id];
   const familleDe = id => initialDe[id] || id;
@@ -228,6 +236,9 @@ function rafraichirSyntheseSessions() {
       <div class="carte">
         <h3 style="margin-top:0;border-left:5px solid #2a78d6;padding-left:10px;">${esc(f?.denomination || 'Formation inconnue')}
           <span style="font-weight:normal;font-size:12px;color:#55636c;">${esc(f?.categorie || '')}</span></h3>
+        <p style="font-size:12px;color:#55636c;margin:-4px 0 12px;">Fiches regroupées —
+          Initiale : <strong>${esc(f?.denomination || '?')}</strong> ·
+          Recyclage : <strong>${esc([...new Set(formations.filter(x => initialDe[x.id] === cle).map(x => x.denomination))].join(', ') || 'aucune fiche reliée')}</strong></p>
         ${ssTableau(ssAgreger([...g.initial, ...g.recyclage]), ssAgreger(g.initial), ssAgreger(g.recyclage))}
       </div>`;
     }).join('')}`;

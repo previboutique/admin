@@ -828,10 +828,12 @@ async function ouvrirSession(id) {
       </div>` : ''}
     </div>`;
 
+  window.__repliEtat = {};   // nouvelle session : on repart des valeurs par défaut
   rendreParticipants(session, participants || []);
   rendreQrEvaluation(session);
   rendreQrEmargement(session);
   rendreSelectionDocuments(session, participants || []);
+  appliquerSectionsRepliables(session, sessionClients, participants || []);
 
   if (PEUT_GERER_SESSIONS()) {
     rendreClientsSession(session.id, window.__sessionClients);
@@ -969,6 +971,80 @@ function ouvrirConfirmationSuppression(sessionId, nbStagiaires) {
     toast('Session supprimée.');
     allerA('sessions');
   };
+}
+
+// ============================================================================
+// SECTIONS REPLIABLES de la fiche session
+// Un clic sur le titre d'une carte la replie / la déplie. Les cartes dont les
+// informations sont déjà renseignées (clients, formateur + financement…) sont
+// repliées d'office, avec un résumé affiché à côté du titre. L'état choisi par
+// l'utilisateur est conservé tant qu'il reste sur la même session (y compris
+// quand une carte est redessinée, ex. la synthèse après un enregistrement).
+// ============================================================================
+function rendreRepliable(carte, cle, replieParDefaut, resume) {
+  if (!carte) return;
+  const h = carte.querySelector(':scope > h3');
+  if (!h || h.dataset.repliable) return;
+  window.__repliEtat = window.__repliEtat || {};
+  if (!(cle in window.__repliEtat)) window.__repliEtat[cle] = !!replieParDefaut;
+
+  const corps = document.createElement('div');
+  corps.className = 'repliable-corps';
+  while (h.nextSibling) corps.appendChild(h.nextSibling);
+  carte.appendChild(corps);
+  carte.dataset.repliableCle = cle;
+
+  const titre = h.innerHTML;
+  h.dataset.repliable = '1';
+  h.style.cursor = 'pointer';
+  h.style.userSelect = 'none';
+  const maj = () => {
+    const replie = window.__repliEtat[cle];
+    corps.style.display = replie ? 'none' : '';
+    h.style.marginBottom = replie ? '0' : '';
+    h.innerHTML = `<span style="display:inline-block;width:16px;color:#55636c;">${replie ? '▸' : '▾'}</span>${titre}` +
+      (replie && resume ? ` <span style="font-weight:normal;font-size:12px;color:#55636c;margin-left:8px;">${resume}</span>` : '');
+  };
+  h.onclick = () => { window.__repliEtat[cle] = !window.__repliEtat[cle]; maj(); };
+  carte._majRepli = maj;
+  maj();
+}
+
+function basculerToutesSections(replie) {
+  document.querySelectorAll('[data-repliable-cle]').forEach(c => {
+    window.__repliEtat[c.dataset.repliableCle] = replie;
+    if (c._majRepli) c._majRepli();
+  });
+}
+
+// Applique le repli aux cartes de la fiche session (appelée à la fin du rendu).
+function appliquerSectionsRepliables(session, sessionClients, participants, formateurs) {
+  const carteParTitre = titre => Array.from(document.querySelectorAll('#vue .carte > h3')).find(h => h.textContent.trim() === titre)?.parentElement;
+  const echap = s => esc(s || '');
+
+  const noms = (sessionClients || []).map(sc => sc.clients?.raison_sociale).filter(Boolean);
+  rendreRepliable(carteParTitre('Clients de la session'), 'clients', noms.length > 0, echap(noms.join(', ')));
+
+  const formateur = session.__formateurNom || null;
+  const origine = session.origine_financement
+    ? ORIGINES_FINANCEMENT.flatMap(g => g.options).find(o => o.valeur === session.origine_financement)?.libelle
+    : null;
+  const modalites = { presentiel: 'Présentiel', distanciel: 'Distanciel', mixte: 'Mixte' };
+  rendreRepliable(carteParTitre('Financement et formateur'), 'financement', !!(formateur && origine),
+    echap([formateur, modalites[session.modalite], origine].filter(Boolean).join(' · ')));
+
+  rendreRepliable(carteParTitre('Documents de la session'), 'documents', true, 'Convention, feuille d\'émargement');
+  rendreRepliable(carteParTitre('Téléchargement groupé et envoi au client'), 'groupe', true, 'ZIP / envoi par email');
+
+  // Barre « Tout déplier / Tout replier » avant la première carte repliable.
+  const premiere = document.querySelector('[data-repliable-cle]');
+  if (premiere && !document.getElementById('barre-repli')) {
+    const barre = document.createElement('div');
+    barre.id = 'barre-repli';
+    barre.style.cssText = 'text-align:right;font-size:12px;margin:-6px 0 8px;';
+    barre.innerHTML = '<a href="#" onclick="basculerToutesSections(false);return false;">Tout déplier</a> · <a href="#" onclick="basculerToutesSections(true);return false;">Tout replier</a>';
+    premiere.parentElement.insertBefore(barre, premiere);
+  }
 }
 
 // ============================================================================
@@ -1269,6 +1345,7 @@ async function rendreQrEmargement(session) {
         </div>
       </div>
     </div>`;
+  rendreRepliable(zone, 'qr-emargement', true, 'QR code, affiche, feuilles signées par client');
 
   const { data } = await supa.from('emargements').select('role').eq('session_id', session.id);
   const c = $('#emarg-compteur');
@@ -1342,6 +1419,7 @@ function rendreQrEvaluation(session) {
         <button class="bouton" style="padding:6px 12px;font-size:13px;background:#eee;color:#333;margin-left:6px;" onclick="window.open('${esc(url)}','_blank')">Tester</button>
       </div>
     </div>`;
+  rendreRepliable(zone, 'qr-evaluation', true, 'QR code, affiche, lien');
 }
 
 async function copierLienEvaluation() {
@@ -1456,6 +1534,7 @@ function rendreSynthese() {
       ${commentaires.map(p => `<div style="font-size:13px;padding:2px 0;"><strong>${esc(p.stagiaires?.prenom)} ${esc(p.stagiaires?.nom)}</strong> : ${esc(p.commentaire_evaluation)}</div>`).join('')}` : ''}
     <h4 style="margin:14px 0 8px;">Réussite</h4>
     ${reussite}`;
+  rendreRepliable(zone, 'synthese', !evalues.length && !reussis && !echecs, evalues.length ? `${evalues.length} évaluation(s)` : '');
 }
 
 // ============================================================================

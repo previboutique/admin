@@ -738,6 +738,14 @@ async function ouvrirSession(id) {
           — ${esc(nomsClients.join(', ') || 'sans client')}
           — statut : ${esc(session.statut)}
         </p>
+        ${PEUT_GERER_SESSIONS() && /secour/i.test(session.formations_catalogue?.categorie || '') ? `
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px;font-size:13px;color:#55636c;">
+          <span>ForePrev — n° de session :</span>
+          <input id="sess-forprev" value="${esc(session.numero_forprev || '')}" placeholder="n° ForePrev" style="width:170px;margin:0;padding:4px 8px;">
+          <span>déclarée le :</span>
+          <input type="date" id="sess-forprev-date" value="${esc(session.date_declaration_forprev || '')}" style="width:150px;margin:0;padding:4px 8px;">
+          <button class="bouton" style="padding:4px 12px;font-size:13px;margin:0;" onclick="enregistrerForprevSession('${session.id}')">Enregistrer</button>
+        </div>` : ''}
       </div>
       <div style="text-align:right;">
         <button class="bouton" style="background:#eee;color:#333;" onclick="allerA('sessions')">← Retour</button>
@@ -794,11 +802,6 @@ async function ouvrirSession(id) {
         <input type="checkbox" id="sess-sous-traitance" style="width:auto;" ${session.sous_traitance_recue ? 'checked' : ''}>
         Session confiée par un autre organisme de formation (sous-traitance reçue)
       </label>
-      ${/secour/i.test(session.formations_catalogue?.categorie || '') ? `
-      <label for="sess-forprev">N° de session ForePrev (SST)</label>
-      <input id="sess-forprev" value="${esc(session.numero_forprev || '')}" style="max-width:420px;" placeholder="ex. numéro fourni par ForePrev">
-      <label for="sess-forprev-date">Date de déclaration ForePrev</label>
-      <input type="date" id="sess-forprev-date" value="${esc(session.date_declaration_forprev || '')}" style="max-width:220px;">` : ''}
       <button class="bouton" style="padding:6px 14px;font-size:13px;margin-top:10px;" onclick="enregistrerFinancementSession('${session.id}')">Enregistrer</button>
       <p style="font-size:12px;color:#55636c;margin:8px 0 0;">Sert au calcul automatique du Bilan Pédagogique et Financier (BPF) annuel.</p>
     </div>` : ''}
@@ -946,13 +949,21 @@ async function ajouterClientSessionExistante(sessionId) {
   ouvrirSession(sessionId);
 }
 
+async function enregistrerForprevSession(sessionId) {
+  const numero = $('#sess-forprev').value.trim() || null;
+  const date = $('#sess-forprev-date').value || null;
+  const { error } = await supa.from('sessions_formation').update({ numero_forprev: numero, date_declaration_forprev: date }).eq('id', sessionId);
+  if (error) { DEBUG.erreur('enregistrerForprevSession', error); toast('Erreur : ' + error.message, 'erreur'); return; }
+  toast('ForePrev enregistré.');
+  if (window.__sessionCourante) { window.__sessionCourante.numero_forprev = numero; window.__sessionCourante.date_declaration_forprev = date; }
+}
+
 async function enregistrerFinancementSession(sessionId) {
   const origine = $('#sess-origine').value;
   const sousTraitance = $('#sess-sous-traitance').checked;
   const modalite = $('#sess-modalite').value;
   const formateurId = $('#sess-formateur')?.value || null;
   const charge = { origine_financement: origine, sous_traitance_recue: sousTraitance, modalite, formateur_id: formateurId };
-  if ($('#sess-forprev')) { charge.numero_forprev = $('#sess-forprev').value.trim() || null; charge.date_declaration_forprev = $('#sess-forprev-date').value || null; }
   const { error } = await supa.from('sessions_formation').update(charge).eq('id', sessionId);
   if (error) { DEBUG.erreur('enregistrerFinancementSession', error); toast('Erreur : ' + error.message, 'erreur'); return; }
   toast('Financement mis à jour.');
@@ -961,7 +972,6 @@ async function enregistrerFinancementSession(sessionId) {
     window.__sessionCourante.sous_traitance_recue = sousTraitance;
     window.__sessionCourante.modalite = modalite;
     window.__sessionCourante.formateur_id = formateurId;
-    if ('numero_forprev' in charge) { window.__sessionCourante.numero_forprev = charge.numero_forprev; window.__sessionCourante.date_declaration_forprev = charge.date_declaration_forprev; }
   }
 }
 

@@ -154,7 +154,7 @@ function rendreResumeFamilles() {
       <div><strong style="font-size:22px;color:${enErreur ? '#b3261e' : '#1a7f3c'};">${enErreur}</strong><div style="font-size:12px;color:#55636c;">familles à corriger</div></div>
       <div style="margin-left:auto;">${familles.length && fiches.length ? '<button class="bouton" onclick="ouvrirRattachementFiches()">Rattacher les fiches du catalogue</button>' : ''}</div>
     </div>
-    ${familles.length === 0 ? '<p style="margin:12px 0 0;color:#55636c;">Aucune famille pour le moment : clique sur « Importer le catalogue de référence » pour charger les 66 familles prêtes à l\'export.</p>' : ''}`;
+    ${familles.length === 0 ? '<p style="margin:12px 0 0;color:#55636c;">Aucune famille pour le moment : clique sur « Importer le catalogue de référence » pour charger les 66 familles prêtes à l\'export. Les ${fiches.length} fiches de ton catalogue pourront ensuite y être rattachées.</p>' : ''}`;
 }
 
 function rendreListeFamilles() {
@@ -222,6 +222,8 @@ async function importerCataloguePasseport() {
     if (error) throw error;
     toast(`Import terminé : ${data.familles_creees} créée(s), ${data.familles_mises_a_jour} mise(s) à jour, ${data.familles_conservees} conservée(s).`);
     await chargerFamilles();
+    // Enchaîne sur le rattachement des fiches du catalogue (suggestions à valider).
+    if (window.__fichesFamilles.length) ouvrirRattachementFiches();
   } catch (e) {
     DEBUG.erreur('importerCataloguePasseport', e);
     toast('Import impossible : ' + (e.message || e), 'erreur');

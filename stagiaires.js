@@ -249,6 +249,7 @@ async function ouvrirFicheStagiaire(id) {
     }
     bouton.disabled = false;
     toast('Stagiaire enregistré.');
+    if (payload.client_id && PEUT_GERER_SESSIONS() && typeof propagerDepuisStagiaire === 'function') await propagerDepuisStagiaire(idStagiaire, payload.client_id);
     ecranStagiaires($('#vue'));
   };
 }

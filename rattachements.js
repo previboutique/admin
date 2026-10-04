@@ -349,3 +349,46 @@ async function rtAnnulerLot(id) {
   toast(`Lot annulé : ${data.annulees} correction(s) défaite(s)` + (data.conservees ? `, ${data.conservees} conservée(s) car modifiée(s) depuis` : ''));
   ouvrirRattachements();
 }
+
+// ----------------------------------------------------------------------------
+// Raccourci « depuis le stagiaire » : on lui donne son entreprise, et on propose de la
+// reporter sur les autres stagiaires de ses sessions qui n'en ont pas (hors sessions
+// déjà multi-entreprises). Appelé après l'enregistrement d'une fiche stagiaire.
+// ----------------------------------------------------------------------------
+async function propagerDepuisStagiaire(stagiaireId, clientId) {
+  if (!stagiaireId || !clientId) return;
+  try {
+    const { data: miens } = await supa.from('session_participants').select('id, session_id, client_id').eq('stagiaire_id', stagiaireId);
+    const sessIds = [...new Set((miens || []).map(p => p.session_id))];
+    if (!sessIds.length) return;
+    const [{ data: tous }, { data: sc }, { data: sessions }] = await Promise.all([
+      supa.from('session_participants').select('id, session_id, stagiaire_id, client_id, stagiaires(nom, prenom, client_id)').in('session_id', sessIds).limit(5000),
+      supa.from('session_clients').select('session_id, client_id').in('session_id', sessIds),
+      supa.from('sessions_formation').select('id, client_id').in('id', sessIds),
+    ]);
+    // sessions où une autre entreprise est déjà connue : on n'y touche pas
+    const autre = new Set();
+    (sc || []).forEach(x => { if (x.client_id !== clientId) autre.add(x.session_id); });
+    (sessions || []).forEach(x => { if (x.client_id && x.client_id !== clientId) autre.add(x.id); });
+    (tous || []).forEach(p => { if (p.client_id && p.client_id !== clientId) autre.add(p.session_id); });
+
+    const cibles = (tous || []).filter(p => !p.client_id && !autre.has(p.session_id)
+      && (p.stagiaire_id === stagiaireId || !p.stagiaires?.client_id || p.stagiaires.client_id === clientId));
+    if (!cibles.length) return;
+    const sessionsTouchees = new Set(cibles.map(p => p.session_id));
+    const autres = cibles.filter(p => p.stagiaire_id !== stagiaireId);
+    const nomClient = ((await supa.from('clients').select('raison_sociale').eq('id', clientId).maybeSingle()).data || {}).raison_sociale || 'cette entreprise';
+    const noms = autres.slice(0, 8).map(p => `${p.stagiaires?.prenom || ''} ${p.stagiaires?.nom || ''}`.trim()).join(', ');
+    if (!confirm(`Rattacher à « ${nomClient} » les stagiaires qui suivent les mêmes sessions et n'ont pas d'entreprise ?\n\n• ${sessionsTouchees.size} session(s)\n• ${autres.length} autre(s) stagiaire(s)${noms ? ' : ' + noms + (autres.length > 8 ? '…' : '') : ''}\n\nSessions déjà liées à une autre entreprise : ignorées.\nOK = oui ; Annuler = non, seulement ce stagiaire.`)) return;
+
+    const actions = [];
+    sessionsTouchees.forEach(sid => actions.push({ type: 'session_client', session_id: sid, client_id: clientId }));
+    cibles.forEach(p => {
+      actions.push({ type: 'participant', participant_id: p.id, client_id: clientId });
+      if (p.stagiaire_id !== stagiaireId && !p.stagiaires?.client_id) actions.push({ type: 'stagiaire', stagiaire_id: p.stagiaire_id, client_id: clientId });
+    });
+    const { data, error } = await supa.rpc('appliquer_rattachements', { p_actions: actions });
+    if (error) { DEBUG.erreur('propagerDepuisStagiaire', error); toast('Propagation impossible : ' + error.message, 'erreur'); return; }
+    toast(`${data.inscriptions} inscription(s), ${data.stagiaires} fiche(s) rattachée(s) — annulable depuis « Corriger les rattachements ».`);
+  } catch (e) { DEBUG.erreur('propagerDepuisStagiaire', e); }
+}

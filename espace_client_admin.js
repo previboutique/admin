@@ -23,7 +23,7 @@ async function chargerSuiviEspaceClient() {
   const depuisIso = depuis.toISOString().slice(0, 10);
   const [{ data: parts, error: e1 }, { data: docs, error: e2 }, { data: sigs, error: e3 }, { data: nirIds, error: e4 }, { data: acces, error: e5 }] = await Promise.all([
     supa.from('session_participants')
-      .select('session_id, client_id, stagiaire_id, stagiaires(nom, prenom, nom_naissance), clients(raison_sociale), sessions_formation!inner(date_debut, statut, numero_session, formations_catalogue(denomination))')
+      .select('session_id, client_id, stagiaire_id, stagiaires(nom, prenom, nom_naissance, client_id, clients(raison_sociale)), clients(raison_sociale), sessions_formation!inner(date_debut, statut, numero_session, formations_catalogue(denomination))')
       .gte('sessions_formation.date_debut', depuisIso)
       .neq('sessions_formation.statut', 'annulee'),
     supa.from('documents_generes').select('session_id, client_id, type').eq('publie_client', true).eq('type', 'convention'),
@@ -54,13 +54,16 @@ async function chargerSuiviEspaceClient() {
   (parts || []).forEach(p => {
     const s = sessions.get(p.session_id) || { session_id: p.session_id, date_debut: p.sessions_formation.date_debut,
       numero: p.sessions_formation.numero_session, formation: p.sessions_formation.formations_catalogue?.denomination, clients: new Map() };
-    const cid = p.client_id || '_sans_client';
-    const c = s.clients.get(cid) || { client_id: p.client_id, nom: p.clients?.raison_sociale || '(client non précisé)',
+    // entreprise de l'inscription, sinon celle de la fiche du stagiaire
+    const clientEff = p.client_id || p.stagiaires?.client_id || null;
+    const nomEff = p.clients?.raison_sociale || p.stagiaires?.clients?.raison_sociale || null;
+    const cid = clientEff || '_sans_client';
+    const c = s.clients.get(cid) || { client_id: clientEff, nom: nomEff || '(aucune entreprise — à corriger)',
       total: 0, incomplets: [], conv: 'non_publiee', signee: null };
     c.total++;
     const manque = infosPasseportManquantes(p.stagiaires, nir.has(p.stagiaire_id));
     if (manque.length) c.incomplets.push({ stagiaire_id: p.stagiaire_id, nom: `${p.stagiaires?.prenom || ''} ${p.stagiaires?.nom || ''}`.trim(), manque });
-    const cle = `${p.session_id}|${p.client_id}`;
+    const cle = `${p.session_id}|${clientEff}`;
     if (signees.has(cle)) { c.conv = 'signee'; c.signee = signees.get(cle); }
     else if (publiees.has(cle)) c.conv = 'a_signer';
     s.clients.set(cid, c);

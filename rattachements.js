@@ -68,6 +68,35 @@ function rtAnalyser({ stagiaires, participants, sessions, clients, participantsS
   return res;
 }
 
+// Inscriptions sans entreprise alors que la fiche du stagiaire en a une : on reporte
+// l'entreprise du stagiaire sur l'inscription (et sur la session si elle ne l'a pas).
+// inscriptions : session_participants sans client_id, avec stagiaires(client_id, nom, prenom).
+function rtAnalyserInscriptions({ inscriptions, sessions, clients }) {
+  const sessMap = new Map((sessions || []).map(s => [s.id, s]));
+  const cliNom = new Map((clients || []).map(c => [c.id, c.raison_sociale]));
+  const groupes = new Map();
+  for (const p of inscriptions || []) {
+    const s = sessMap.get(p.session_id);
+    if (!s) continue;
+    const cs = new Set((s.session_clients || []).map(x => x.client_id));
+    if (!cs.size && s.client_id) cs.add(s.client_id);
+    const client = p.stagiaires?.client_id || (cs.size === 1 ? [...cs][0] : null);
+    if (!client) continue;
+    const g = groupes.get(s.id) || { session: s, items: [], parClient: new Map(), nouveauxClients: new Set() };
+    g.items.push({ p, client });
+    g.parClient.set(client, (g.parClient.get(client) || 0) + 1);
+    if (!cs.has(client)) g.nouveauxClients.add(client);
+    groupes.set(s.id, g);
+  }
+  const liste = [...groupes.values()].map(g => {
+    g.actions = [];
+    g.nouveauxClients.forEach(c => g.actions.push({ type: 'session_client', session_id: g.session.id, client_id: c }));
+    g.items.forEach(({ p, client }) => g.actions.push({ type: 'participant', participant_id: p.id, client_id: client }));
+    return g;
+  }).sort((a, b) => String(b.session.date_debut || '').localeCompare(String(a.session.date_debut || '')));
+  return { groupes: liste, cliNom };
+}
+
 // ----------------------------------------------------------------------------
 // Chargement
 // ----------------------------------------------------------------------------
@@ -86,28 +115,40 @@ async function rtCharger() {
   if (e1) throw e1;
   const ids = (stagiaires || []).map(s => s.id);
   const participants = await rtParLots('session_participants', 'stagiaire_id', ids, 'id, session_id, stagiaire_id, client_id');
-  const sessIds = [...new Set(participants.map(p => p.session_id))];
+  // Inscriptions sans entreprise dont le stagiaire, lui, en a une
+  const { data: inscrSansClient, error: e3 } = await supa.from('session_participants')
+    .select('id, session_id, stagiaire_id, client_id, stagiaires(client_id, nom, prenom)').is('client_id', null).limit(5000);
+  if (e3) throw e3;
+  const inscriptions = (inscrSansClient || []).filter(p => p.stagiaires?.client_id);
+  const sessIds = [...new Set([...participants.map(p => p.session_id), ...inscriptions.map(p => p.session_id)])];
   const sessions = await rtParLots('sessions_formation', 'id', sessIds, 'id, numero_session, date_debut, client_id, formations_catalogue(denomination), session_clients(client_id)');
   const { data: clients, error: e2 } = await supa.from('clients').select('id, raison_sociale').order('raison_sociale').limit(3000);
   if (e2) throw e2;
   const sansClient = sessions.filter(s => !(s.session_clients || []).length && !s.client_id).map(s => s.id);
   const participantsSessionsSansClient = sansClient.length
     ? await rtParLots('session_participants', 'session_id', sansClient, 'id, session_id, stagiaire_id, client_id, stagiaires(client_id)') : [];
-  return { stagiaires: stagiaires || [], participants, sessions, clients: clients || [], participantsSessionsSansClient };
+  return { stagiaires: stagiaires || [], participants, sessions, clients: clients || [], participantsSessionsSansClient, inscriptions, nbInscriptionsSansClient: (inscrSansClient || []).length };
 }
 
 // ----------------------------------------------------------------------------
 // Affichage
 // ----------------------------------------------------------------------------
 async function compterStagiairesSansClient() {
-  const { count, error } = await supa.from('stagiaires').select('id', { count: 'exact', head: true }).is('client_id', null);
-  return error ? 0 : (count || 0);
+  const [a, b] = await Promise.all([
+    supa.from('stagiaires').select('id', { count: 'exact', head: true }).is('client_id', null),
+    supa.from('session_participants').select('id', { count: 'exact', head: true }).is('client_id', null),
+  ]);
+  return { stagiaires: a.error ? 0 : (a.count || 0), inscriptions: b.error ? 0 : (b.count || 0) };
 }
 
 function bandeauRattachements(n) {
-  if (!n) return '';
+  const nb = typeof n === 'object' ? n : { stagiaires: n, inscriptions: 0 };
+  if (!nb.stagiaires && !nb.inscriptions) return '';
+  const morceaux = [];
+  if (nb.stagiaires) morceaux.push(`<strong>${nb.stagiaires}</strong> fiche(s) stagiaire sans entreprise`);
+  if (nb.inscriptions) morceaux.push(`<strong>${nb.inscriptions}</strong> inscription(s) à une session sans entreprise`);
   return `<div class="carte" style="background:#fff9e8;border-color:#e6c76a;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
-    <span><strong>${n}</strong> stagiaire(s) ne sont rattachés à aucune entreprise (ils n'apparaîtront pas dans l'espace client ni sur les conventions).</span>
+    <span>${morceaux.join(' · ')} (ils n'apparaissent pas correctement dans l'espace client, sur les conventions et dans le suivi Passeport).</span>
     <button class="bouton" onclick="ouvrirRattachements()">Corriger les rattachements</button></div>
     <div id="rattachements-zone"></div>`;
 }
@@ -126,10 +167,11 @@ async function ouvrirRattachements() {
   let donnees;
   try { donnees = await rtCharger(); } catch (e) { DEBUG.erreur('rtCharger', e); zone.innerHTML = `<div class="carte"><p class="erreur">Erreur : ${esc(e.message || e)}</p></div>`; return; }
   const r = rtAnalyser(donnees);
-  window.__rt = { r, clients: donnees.clients, donnees };
+  const ri = rtAnalyserInscriptions(donnees);
+  window.__rt = { r, ri, clients: donnees.clients, donnees };
 
   const nbSess = r.sessionsSansClient.size;
-  const total = donnees.stagiaires.length;
+  const total = donnees.stagiaires.length + ri.groupes.length;
   const { data: lots } = await supa.from('rattachements_lots').select('*').order('created_at', { ascending: false }).limit(8);
 
   const ligneEvident = (x, i) => `
@@ -142,18 +184,32 @@ async function ouvrirRattachements() {
   zone.innerHTML = `
     <div class="carte">
       <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
-        <h3 style="margin:0;">Rattachements à corriger — ${total} stagiaire(s) sans entreprise</h3>
+        <h3 style="margin:0;">Rattachements à corriger</h3>
         <button class="bouton" style="background:#eee;color:#333;" onclick="$('#rattachements-zone').innerHTML=''">Fermer</button>
       </div>
       <p style="font-size:13px;color:#55636c;">L'appli ne remplit que les cases vides : une entreprise déjà renseignée n'est jamais remplacée. Chaque lot appliqué est enregistré et peut être annulé.</p>
       <ul style="font-size:13px;margin:6px 0 0;padding-left:18px;">
-        <li><strong>${r.evident.length}</strong> cas évident(s) : toutes ses sessions pointent vers la même entreprise</li>
+        <li><strong>${donnees.nbInscriptionsSansClient}</strong> inscription(s) sans entreprise au total, dont <strong>${ri.groupes.reduce((n, g) => n + g.items.length, 0)}</strong> récupérables depuis la fiche du stagiaire (${ri.groupes.length} session(s))</li>
+        <li><strong>${donnees.stagiaires.length}</strong> fiche(s) stagiaire sans entreprise : <strong>${r.evident.length}</strong> cas évident(s) : toutes ses sessions pointent vers la même entreprise</li>
         <li><strong>${nbSess}</strong> session(s) sans entreprise (à renseigner une fois pour tous leurs stagiaires)</li>
         <li><strong>${r.choisir.length}</strong> stagiaire(s) dans une session à plusieurs entreprises (à choisir)</li>
         <li><strong>${r.conflit.length}</strong> stagiaire(s) venus pour plusieurs entreprises différentes</li>
         <li><strong>${r.orphelins.length}</strong> stagiaire(s) sans aucune session</li>
       </ul>
     </div>
+
+    ${ri.groupes.length ? `<div class="carte"><h3 style="margin-top:0;">0. Inscriptions à rattacher d'après la fiche du stagiaire (${ri.groupes.reduce((n, g) => n + g.items.length, 0)})</h3>
+      <p style="font-size:12px;color:#55636c;margin:0 0 8px;">Ces stagiaires ont bien une entreprise, mais leur inscription à la session ne l'a pas retenue. L'entreprise est reportée sur l'inscription ; si la session ne la connaît pas encore, elle y est ajoutée (sans tarif : à compléter dans la session).</p>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;"><tbody>${ri.groupes.map((g, i) => `
+        <tr style="border-top:1px solid #eee;"><td style="padding:5px 8px;"><input type="checkbox" class="rt-insc" data-i="${i}" checked style="width:auto;"></td>
+          <td style="padding:5px 8px;">${rtSessionLibelle(g.session)}</td>
+          <td style="padding:5px 8px;">${[...g.parClient].map(([c, n]) => `<strong>${esc(ri.cliNom.get(c) || '?')}</strong> (${n})`).join(', ')}
+            ${g.nouveauxClients.size ? `<div style="font-size:12px;color:#8a5a00;">+ ajouté(e) à la session : ${[...g.nouveauxClients].map(c => esc(ri.cliNom.get(c) || '?')).join(', ')}</div>` : ''}</td></tr>`).join('')}
+      </tbody></table>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="bouton" style="background:#eee;color:#333;font-size:13px;" onclick="document.querySelectorAll('.rt-insc').forEach(c=>c.checked=true)">Tout cocher</button>
+        <button class="bouton" style="background:#eee;color:#333;font-size:13px;" onclick="document.querySelectorAll('.rt-insc').forEach(c=>c.checked=false)">Tout décocher</button>
+        <button class="bouton" onclick="rtAppliquerInscriptions()">Aperçu et application</button></div></div>` : ''}
 
     ${r.evident.length ? `<div class="carte"><h3 style="margin-top:0;">1. Propositions évidentes (${r.evident.length})</h3>
       <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;"><tbody>${r.evident.map(ligneEvident).join('')}</tbody></table></div>
@@ -193,7 +249,8 @@ async function ouvrirRattachements() {
         <select class="rt-orph" data-i="${i}" style="flex:1;min-width:220px;">${rtOptionsClients(donnees.clients, null)}</select></div>`).join('')}
       <div style="margin-top:10px;"><button class="bouton" onclick="rtAppliquerOrphelins()">Aperçu et application</button></div></div>` : ''}
 
-    ${total === 0 ? '<div class="carte"><p class="ok" style="color:#1a7f3c;margin:0;">Tous les stagiaires sont rattachés à une entreprise.</p></div>' : ''}
+    ${total === 0 && !donnees.nbInscriptionsSansClient ? '<div class="carte"><p class="ok" style="color:#1a7f3c;margin:0;">Tous les stagiaires et toutes les inscriptions sont rattachés à une entreprise.</p></div>' : ''}
+    ${total === 0 && donnees.nbInscriptionsSansClient ? `<div class="carte"><p style="color:#8a5a00;margin:0;">${donnees.nbInscriptionsSansClient} inscription(s) restent sans entreprise et ne peuvent pas être déduites automatiquement (le stagiaire n'a pas d'entreprise et la session en a zéro ou plusieurs). Ouvrez la session concernée pour choisir l'entreprise de chaque stagiaire.</p></div>` : ''}
 
     <div class="carte"><h3 style="margin-top:0;">Historique des corrections</h3>
       ${(lots || []).length ? (lots || []).map(l => `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap;padding:5px 0;border-top:1px solid #eee;font-size:13px;${l.annule ? 'opacity:.55;' : ''}">
@@ -217,6 +274,13 @@ async function rtAppliquer(actions, intitule) {
   toast(`Appliqué : ${data.stagiaires} stagiaire(s), ${data.inscriptions} inscription(s), ${data.sessions} session(s)` + (data.ignores ? ` (${data.ignores} ignoré(s))` : ''));
   await ouvrirRattachements();
   if (typeof ecranStagiaires === 'function' && $('#stagiaires-liste')) { /* la liste se rafraîchit à la prochaine ouverture */ }
+}
+
+function rtAppliquerInscriptions() {
+  const { ri } = window.__rt;
+  const actions = [];
+  document.querySelectorAll('.rt-insc:checked').forEach(c => actions.push(...ri.groupes[Number(c.dataset.i)].actions));
+  rtAppliquer(actions, 'Inscriptions : entreprise du stagiaire');
 }
 
 function rtAppliquerEvidents() {

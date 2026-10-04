@@ -202,19 +202,18 @@ function genererConvocation(session, participant, sansTelechargement) {
   const ySal = Math.max(623.6, basConsignes + 50);
   T(53, ySal, 12, false, `Veuillez recevoir ${nomComplet} , l'expression de nos sincères salutations.`);
   const nomOrg = S.organisation?.nom_commercial || String(S.organisation?.raison_sociale || '').replace(/^SARL\s+/i, '');
-  T(383, ySal + 31, 12, false, nomOrg);
+  T(345, ySal + 27, 12, false, nomOrg);
 
   // Tampon / signature de l'organisme (en bas à droite)
+  // Tampon à gauche, signature à sa droite (côte à côte : aucun chevauchement, quel que soit le fond des images)
   const tampon = S.organisation?._tamponDataUrl, signature = S.organisation?._signatureDataUrl;
-  [tampon, signature].forEach((img, idx) => {
+  [[tampon, 125, 78, 345, 'tampon-organisme'], [signature, 80, 50, 480, 'signature-organisme']].forEach(([img, wMax, hMax, gauche, alias]) => {
     if (!img) return;
     try {
       const pr = doc.getImageProperties(img);
-      let w = idx === 0 ? 150 : 90, hh = (pr.height / pr.width) * w;
-      const hMax = idx === 0 ? 88 : 50;
+      let w = wMax, hh = (pr.height / pr.width) * w;
       if (hh > hMax) { hh = hMax; w = (pr.width / pr.height) * hh; }
-      const x = idx === 0 ? 372 : 372 + 75 - w / 2, yy = idx === 0 ? ySal + 38 : ySal + 55;
-      doc.addImage(img, pr.fileType || 'PNG', x * MM, yy * MM, w * MM, hh * MM, idx === 0 ? 'tampon-organisme' : 'signature-organisme', 'FAST');
+      doc.addImage(img, pr.fileType || 'PNG', gauche * MM, (ySal + 48) * MM, w * MM, hh * MM, alias, 'FAST');
     } catch (e) { /* image illisible : ignorée */ }
   });
 
@@ -223,7 +222,7 @@ function genererConvocation(session, participant, sansTelechargement) {
   if (participant.token_acces && typeof qrDataUrl === 'function' && typeof qrcode === 'function' && typeof urlPositionnement === 'function') {
     try {
       if (f?.theme_positionnement) qrs.push({ img: qrDataUrl(urlPositionnement(participant), 6), lignes: ['Je teste mes connaissances', 'avant la formation'] });
-      if ((S.organisation?.reglement_interieur || '').trim()) qrs.push({ img: qrDataUrl(urlReglement(participant), 6), lignes: ['Je consulte le règlement', 'intérieur avant la formation'] });
+      qrs.push({ img: qrDataUrl(urlReglement(participant), 6), lignes: ['Je consulte le règlement', 'intérieur avant la formation'] });
     } catch (e) { /* QR impossible : la convocation reste générée sans */ }
   }
   qrs.forEach((q, i) => {

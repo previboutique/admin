@@ -127,28 +127,35 @@ async function rtCharger() {
   const sansClient = sessions.filter(s => !(s.session_clients || []).length && !s.client_id).map(s => s.id);
   const participantsSessionsSansClient = sansClient.length
     ? await rtParLots('session_participants', 'session_id', sansClient, 'id, session_id, stagiaire_id, client_id, stagiaires(client_id)') : [];
-  return { stagiaires: stagiaires || [], participants, sessions, clients: clients || [], participantsSessionsSansClient, inscriptions, nbInscriptionsSansClient: (inscrSansClient || []).length };
+  // Sessions importées avec une date de remplacement (01/01/1900) : à dater
+  const { data: sessions1900, error: e4 } = await supa.from('sessions_formation')
+    .select('id, numero_session, date_debut, date_fin, statut, formations_catalogue(denomination), session_clients(clients(raison_sociale)), session_participants(stagiaires(nom, prenom))')
+    .lt('date_debut', '2000-01-01').order('numero_session').limit(1000);
+  if (e4) throw e4;
+  return { stagiaires: stagiaires || [], participants, sessions, clients: clients || [], participantsSessionsSansClient, inscriptions, nbInscriptionsSansClient: (inscrSansClient || []).length, sessions1900: sessions1900 || [] };
 }
 
 // ----------------------------------------------------------------------------
 // Affichage
 // ----------------------------------------------------------------------------
 async function compterStagiairesSansClient() {
-  const [a, b] = await Promise.all([
+  const [a, b, c] = await Promise.all([
     supa.from('stagiaires').select('id', { count: 'exact', head: true }).is('client_id', null),
     supa.from('session_participants').select('id', { count: 'exact', head: true }).is('client_id', null),
+    supa.from('sessions_formation').select('id', { count: 'exact', head: true }).lt('date_debut', '2000-01-01'),
   ]);
-  return { stagiaires: a.error ? 0 : (a.count || 0), inscriptions: b.error ? 0 : (b.count || 0) };
+  return { stagiaires: a.error ? 0 : (a.count || 0), inscriptions: b.error ? 0 : (b.count || 0), sessions1900: c.error ? 0 : (c.count || 0) };
 }
 
 function bandeauRattachements(n) {
   const nb = typeof n === 'object' ? n : { stagiaires: n, inscriptions: 0 };
-  if (!nb.stagiaires && !nb.inscriptions) return '';
+  if (!nb.stagiaires && !nb.inscriptions && !nb.sessions1900) return '';
   const morceaux = [];
+  if (nb.sessions1900) morceaux.push(`<strong>${nb.sessions1900}</strong> session(s) datée(s) 01/01/1900`);
   if (nb.stagiaires) morceaux.push(`<strong>${nb.stagiaires}</strong> fiche(s) stagiaire sans entreprise`);
   if (nb.inscriptions) morceaux.push(`<strong>${nb.inscriptions}</strong> inscription(s) à une session sans entreprise`);
   return `<div class="carte" style="background:#fff9e8;border-color:#e6c76a;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
-    <span>${morceaux.join(' · ')} (ils n'apparaissent pas correctement dans l'espace client, sur les conventions et dans le suivi Passeport).</span>
+    <span>${morceaux.join(' · ')} (à corriger pour l'espace client, les conventions et le suivi Passeport).</span>
     <button class="bouton" onclick="ouvrirRattachements()">Corriger les rattachements</button></div>
     <div id="rattachements-zone"></div>`;
 }
@@ -171,7 +178,7 @@ async function ouvrirRattachements() {
   window.__rt = { r, ri, clients: donnees.clients, donnees };
 
   const nbSess = r.sessionsSansClient.size;
-  const total = donnees.stagiaires.length + ri.groupes.length;
+  const total = donnees.stagiaires.length + ri.groupes.length + donnees.sessions1900.length;
   const { data: lots } = await supa.from('rattachements_lots').select('*').order('created_at', { ascending: false }).limit(8);
 
   const ligneEvident = (x, i) => `
@@ -197,6 +204,18 @@ async function ouvrirRattachements() {
         <li><strong>${r.orphelins.length}</strong> stagiaire(s) sans aucune session</li>
       </ul>
     </div>
+
+    ${donnees.sessions1900.length ? `<div class="carte"><h3 style="margin-top:0;">Sessions à dater (${donnees.sessions1900.length})</h3>
+      <p style="font-size:12px;color:#55636c;margin:0 0 8px;">Ces sessions ont une date de remplacement (01/01/1900) venue d'un import. Saisissez la vraie date : la session est corrigée sur place, son numéro est recalculé et l'ancienne date reste dans l'historique de la fiche. Laissez la date de fin vide pour une formation d'un jour.</p>
+      <div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:13px;"><tbody>${donnees.sessions1900.map((s, i) => {
+        const noms = (s.session_participants || []).map(p => `${p.stagiaires?.prenom || ''} ${p.stagiaires?.nom || ''}`.trim());
+        const cli = [...new Set((s.session_clients || []).map(c => c.clients?.raison_sociale).filter(Boolean))].join(', ');
+        return `<tr style="border-top:1px solid #eee;"><td style="padding:5px 8px;"><strong>${esc(s.numero_session || '—')}</strong><br>${esc(s.formations_catalogue?.denomination || '')}</td>
+          <td style="padding:5px 8px;font-size:12px;color:#55636c;">${cli ? '<strong>' + esc(cli) + '</strong><br>' : ''}<details><summary style="cursor:pointer;">${noms.length} stagiaire(s)</summary>${noms.map(esc).join('<br>')}</details></td>
+          <td style="padding:5px 8px;white-space:nowrap;"><input type="date" class="rt-d1" data-i="${i}" style="width:150px;" title="Date de début"> → <input type="date" class="rt-d2" data-i="${i}" style="width:150px;" title="Date de fin (facultatif)"></td>
+          <td style="padding:5px 8px;"><button class="bouton" style="font-size:12px;padding:4px 10px;" onclick="rtCorrigerDate(${i})">Corriger</button></td></tr>`; }).join('')}
+      </tbody></table></div>
+      <div style="margin-top:10px;"><button class="bouton" onclick="rtCorrigerToutesDates()">Corriger toutes les lignes dont la date est saisie</button></div></div>` : ''}
 
     ${ri.groupes.length ? `<div class="carte"><h3 style="margin-top:0;">0. Inscriptions à rattacher d'après la fiche du stagiaire (${ri.groupes.reduce((n, g) => n + g.items.length, 0)})</h3>
       <p style="font-size:12px;color:#55636c;margin:0 0 8px;">Ces stagiaires ont bien une entreprise, mais leur inscription à la session ne l'a pas retenue. L'entreprise reportée est celle inscrite sur la fiche de chaque stagiaire (« Voir les stagiaires » pour contrôler nom par nom). Elle est reportée sur l'inscription ; si la session ne la connaît pas encore, elle y est ajoutée (sans tarif : à compléter dans la session).</p>
@@ -294,7 +313,20 @@ function rtAppliquerLigneInscription(i) {
       if (!p.stagiaires?.client_id) actions.push({ type: 'stagiaire', stagiaire_id: p.stagiaire_id, client_id: c });
     });
   }
-  rtAppliquer(actions, 'Session ' + (g.session.numero_session || '') + ' : ' + g.items.length + ' inscription(s)');
+  const choisi = sel && sel.value && sel.value !== propose ? sel.value : null;
+  // Fiches stagiaires qui indiquent une autre entreprise que celle choisie : correction proposée à part
+  const fichesDivergentes = choisi ? g.items.filter(({ p }) => p.stagiaires?.client_id && p.stagiaires.client_id !== choisi) : [];
+  rtAppliquer(actions, 'Session ' + (g.session.numero_session || '') + ' : ' + g.items.length + ' inscription(s)').then(async () => {
+    if (!fichesDivergentes.length) return;
+    const nomChoisi = window.__rt.ri.cliNom.get(choisi) || 'cette entreprise';
+    const liste = fichesDivergentes.map(({ p }) => `• ${p.stagiaires.prenom} ${p.stagiaires.nom} (fiche : ${window.__rt.ri.cliNom.get(p.stagiaires.client_id) || '?'})`).join('\n');
+    if (!confirm(`Les fiches de ces ${fichesDivergentes.length} stagiaire(s) indiquent encore une autre entreprise :\n\n${liste}\n\nLes corriger en « ${nomChoisi} » ?\n\nAttention : cette correction n'est pas annulable en un clic (l'ancienne entreprise est rappelée ci-dessus).`)) return;
+    const ids = fichesDivergentes.map(({ p }) => p.stagiaire_id);
+    const { error } = await supa.from('stagiaires').update({ client_id: choisi }).in('id', ids);
+    if (error) { DEBUG.erreur('corrigerFiches', error); toast('Correction des fiches impossible : ' + error.message, 'erreur'); return; }
+    toast(`${ids.length} fiche(s) stagiaire corrigée(s) en « ${nomChoisi} ».`);
+    await ouvrirRattachements();
+  });
 }
 
 function rtAppliquerInscriptions() {
@@ -412,4 +444,37 @@ async function propagerDepuisStagiaire(stagiaireId, clientId) {
     if (error) { DEBUG.erreur('propagerDepuisStagiaire', error); toast('Propagation impossible : ' + error.message, 'erreur'); return; }
     toast(`${data.inscriptions} inscription(s), ${data.stagiaires} fiche(s) rattachée(s) — annulable depuis « Corriger les rattachements ».`);
   } catch (e) { DEBUG.erreur('propagerDepuisStagiaire', e); }
+}
+
+
+// Correction des sessions datées 1900 : réutilise la correction « erreur de saisie » (reporter_session),
+// qui change la date sur place, recalcule le numéro si le mois change et garde l'historique.
+async function rtCorrigerUneDate(i) {
+  const s = window.__rt.donnees.sessions1900[i];
+  const d1 = document.querySelector(`.rt-d1[data-i="${i}"]`).value;
+  const d2 = document.querySelector(`.rt-d2[data-i="${i}"]`).value || d1;
+  if (!d1) return null;
+  if (d2 < d1) throw new Error(`${s.numero_session} : la date de fin précède la date de début.`);
+  const { error } = await supa.rpc('reporter_session', { p_session: s.id, p_date_debut: d1, p_date_fin: d2, p_motif: 'erreur_saisie', p_commentaire: 'Date de remplacement 01/01/1900 corrigée après import' });
+  if (error) throw new Error(`${s.numero_session} : ${error.message}`);
+  return s.numero_session;
+}
+async function rtCorrigerDate(i) {
+  try {
+    if (!document.querySelector(`.rt-d1[data-i="${i}"]`).value) { toast('Saisissez d\'abord la date de début.', 'erreur'); return; }
+    await rtCorrigerUneDate(i);
+    toast('Date corrigée.');
+    await ouvrirRattachements();
+  } catch (e) { DEBUG.erreur('rtCorrigerDate', e); toast('Erreur : ' + (e.message || e), 'erreur'); }
+}
+async function rtCorrigerToutesDates() {
+  const n = [...document.querySelectorAll('.rt-d1')].filter(x => x.value).length;
+  if (!n) { toast('Aucune date saisie.', 'erreur'); return; }
+  if (!confirm(`Corriger la date de ${n} session(s) ? Les numéros seront recalculés et les anciennes dates gardées dans l'historique de chaque session.`)) return;
+  let ok = 0; const erreurs = [];
+  for (let i = 0; i < window.__rt.donnees.sessions1900.length; i++) {
+    try { if (await rtCorrigerUneDate(i)) ok++; } catch (e) { erreurs.push(e.message || String(e)); }
+  }
+  toast(`${ok} session(s) corrigée(s)` + (erreurs.length ? ` — ${erreurs.length} erreur(s) : ${erreurs[0]}` : ''), erreurs.length ? 'erreur' : undefined);
+  await ouvrirRattachements();
 }

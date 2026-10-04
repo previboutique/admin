@@ -152,6 +152,17 @@ function fsConstruire(doc, d, polices) {
   const stat = (s, centres) => { if (!s) return; [s.at, s.mp, s.itt].forEach((v, i) => { if (v !== null && v !== undefined) texte(centres[i] - largeur(String(v), 12, false) / 2, 553.5, 12, false, String(v)); }); };
   stat(d.statN1, [922, 962, 1004]); stat(d.statN2, [1072, 1112, 1154]);
 
+  // QR codes de la session (émargement + évaluation), dans l'espace libre sous le matériel
+  const qrs = (d.qrs || []).filter(q => q && q.image);
+  qrs.forEach((q, i) => {
+    const taille = 110, x = qrs.length === 1 ? 240 : 70 + i * 250, y = 335;
+    try { doc.addImage(q.image, 'PNG', x, y, taille, taille, 'qr-' + i, 'FAST'); } catch (e) { return; }
+    const w = largeur(q.libelle, 12, true);
+    texte(x + taille / 2 - w / 2, y + taille + 2, 12, true, q.libelle);
+    const w2 = largeur(q.detail, 10, false);
+    texte(x + taille / 2 - w2 / 2, y + taille + 17, 10, false, q.detail, '#55636C');
+  });
+
   // Liste des inscrits : jusqu'à 10 stagiaires = présentation du modèle (5 lignes x 2 colonnes) ;
   // de 11 à 20 = présentation resserrée (10 lignes x 2 colonnes, texte plus petit) ; au-delà de 20 : mention.
   const MAX_INSCRITS = 20;
@@ -268,6 +279,7 @@ function fsPreparer(session, participants, extra) {
     lieu: [session.lieu, session.adresse, [session.code_postal, String(session.ville || '').toUpperCase()].filter(Boolean).join(' ')].filter(Boolean).join(', '),
     statN1: extra.statN1 ? { at: extra.statN1.accidents_travail, mp: extra.statN1.maladies_professionnelles, itt: extra.statN1.jours_itt } : null,
     statN2: extra.statN2 ? { at: extra.statN2.accidents_travail, mp: extra.statN2.maladies_professionnelles, itt: extra.statN2.jours_itt } : null,
+    qrs: extra.qrs || [],
     inscrits, lignesEval, noteTotale: moys.length ? moys.reduce((a, b) => a + b, 0) / moys.length : null,
   };
 }
@@ -292,9 +304,17 @@ async function genererFicheSynthese(session, participants) {
       statN1 = (st.data || []).find(x => x.annee === annee - 1) || null; statN2 = (st.data || []).find(x => x.annee === annee - 2) || null;
       conv = (sg.data || [])[0]?.signe_le || null;
     }
+    // QR codes (mêmes liens que dans la fiche session) ; ignorés si les patchs SQL correspondants n'ont pas été exécutés
+    const qrs = [];
+    try {
+      if (typeof qrcode === 'function' && typeof qrDataUrl === 'function') {
+        if (session.token_emargement) qrs.push({ image: qrDataUrl(urlEmargement(session), 8), libelle: 'Émargement', detail: 'stagiaires et formateur' });
+        if (session.token_evaluation) qrs.push({ image: qrDataUrl(urlEvaluation(session), 8), libelle: 'Évaluation', detail: 'satisfaction à chaud' });
+      }
+    } catch (e) { DEBUG.erreur('fiche synthèse QR', e); }
     const entree = sc.find(x => x.client_id === clientId);
     const d = fsPreparer(session, participants, {
-      client, contact, statN1, statN2, conventionSigneeLe: conv, logo: S.organisation?._logoDataUrl || null,
+      client, contact, statN1, statN2, conventionSigneeLe: conv, logo: S.organisation?._logoDataUrl || null, qrs,
       prix: entree?.prix_unitaire ?? null, devis: entree?.numero_devis || null,
     });
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: [FS_PAGE_L, FS_PAGE_H], compress: true });

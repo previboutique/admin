@@ -32,6 +32,7 @@ function piedDePageTexte() {
 }
 
 function ajouterPiedDePage(doc) {
+  if (doc.__sansPied) return;     // document qui dessine son propre pied de page (ex. convocation)
   const pages = doc.internal.getNumberOfPages();
   for (let i = 1; i <= pages; i++) {
     doc.setPage(i);
@@ -127,72 +128,124 @@ function nomFichierDoc(prefixe, session, stagiaire, nomClient) {
 // CONVOCATION — un document par stagiaire
 // ============================================================================
 function genererConvocation(session, participant, sansTelechargement) {
+  // Mise en page calquée sur la convocation d'origine (Excel/Calibri) : coordonnées en points
+  // (A4 = 595 x 842 pt), police Carlito (équivalent métrique de Calibri) si déjà chargée.
   const doc = new jsPDF({ compress: true });
-  ajouterLogoEnTete(doc);
+  const MM = 0.352778;                                   // 1 pt en mm
+  const avecCarlito = typeof FS_POLICES !== 'undefined' && !!FS_POLICES;
+  let POL = 'helvetica';
+  if (avecCarlito) {
+    doc.addFileToVFS('Carlito-Regular.ttf', FS_POLICES.normal);
+    doc.addFont('Carlito-Regular.ttf', 'Carlito', 'normal', undefined, 'Identity-H');
+    doc.addFileToVFS('Carlito-Bold.ttf', FS_POLICES.gras);
+    doc.addFont('Carlito-Bold.ttf', 'Carlito', 'bold', undefined, 'Identity-H');
+    POL = 'Carlito';
+  }
+  // Texte posé par son haut de ligne (comme dans le modèle) ; align 'c' = centré sur x
+  const T = (x, haut, taille, gras, texte, align, noir) => {
+    doc.setFont(POL, gras ? 'bold' : 'normal'); doc.setFontSize(taille);
+    doc.setTextColor(...(noir || [0, 0, 0]));
+    doc.text(String(texte), x * MM, (haut + 0.952 * taille) * MM, align === 'c' ? { align: 'center' } : align === 'd' ? { align: 'right' } : undefined);
+  };
   const f = session.formations_catalogue;
   const st = participant.stagiaires;
-  let y = 20;
+  const nomComplet = `${st.civilite || ''} ${String(st.nom || '').toUpperCase()} ${st.prenom || ''}`.replace(/\s+/g, ' ').trim();
 
-  y = titre(doc, 'CONVOCATION', y);
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
-  doc.text(`${st.civilite || ''} ${st.prenom} ${st.nom}`.trim(), 105, y + 3, { align: 'center' });
-  y += 15;
-
-  y = paragraphe(doc, `Vous êtes attendu(e) le ${formatPlageDatesLongue(session.date_debut, session.date_fin)} pour la formation intitulée :`, y);
-  doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
-  const denomLignes = doc.splitTextToSize(f?.denomination || '', LARGEUR_UTILE);
-  doc.text(denomLignes, 105, y + 3, { align: 'center' });
-  y += denomLignes.length * 6 + 8;
-
-  const adresse = [session.lieu, session.adresse, [session.code_postal, session.ville].filter(Boolean).join(' ')].filter(Boolean);
-  doc.setFont('helvetica', 'normal'); doc.setFontSize(10.5);
-  doc.text("La formation se déroulera à l'adresse :", MARGE, y);
-  doc.text(adresse.length ? adresse : ['Adresse à confirmer'], 195, y, { align: 'right' });
-  y += Math.max(1, adresse.length) * 5 + 8;
-
-  y = paragraphe(doc, `Elle se déroulera le ${formatPlageDatesLongue(session.date_debut, session.date_fin)}`, y, { apres: 6 });
-
-  doc.setFont('helvetica', 'normal'); doc.text('Selon les horaires suivant :', MARGE, y); y += 8;
-  const horaires = (session.horaires && session.horaires[0]) || {};
-  doc.text(`Heure de début :   ${horaires.debut || 'à préciser'}`, MARGE, y); y += 6;
-  doc.text(`Pause déjeuner :   ${horaires.pause_debut || '—'} à ${horaires.pause_fin || '—'}`, MARGE, y); y += 6;
-  doc.text(`Heure de fin :     ${horaires.fin || 'à préciser'}`, MARGE, y); y += 10;
-
-  if (f?.consignes_convocation) {
-    y = paragraphe(doc, "Afin de garantir le bon déroulement du stage, merci d'appliquer les consignes ci-dessous :", y, { apres: 2 });
-    f.consignes_convocation.split('\n').forEach(ligne => {
-      y = paragraphe(doc, '• ' + ligne.replace(/^[•\t\s]+/, ''), y, { apres: 1 });
-    });
-    y += 6;
+  // Logo de l'organisme, centré en haut
+  const logo = S.organisation?._logoDataUrl;
+  if (logo) {
+    try {
+      const pr = doc.getImageProperties(logo);
+      let w = 112, h = (pr.height / pr.width) * w;
+      if (h > 74) { h = 74; w = (pr.width / pr.height) * h; }
+      doc.addImage(logo, pr.fileType || 'PNG', (297.6 - w / 2) * MM, (50 + (74 - h) / 2) * MM, w * MM, h * MM, 'logo-organisme', 'FAST');
+    } catch (e) { /* logo illisible : ignoré */ }
   }
 
-  // QR codes PERSONNELS du stagiaire : questionnaire de positionnement et règlement intérieur (voir positionnement.js)
+  T(295.5, 129.2, 26, false, 'CONVOCATION', 'c');
+  T(295.5, 175.7, 14, true, nomComplet, 'c');
+  const multi = !!(session.date_fin && session.date_fin !== session.date_debut);
+  T(53, 208.6, 12, false, `Vous êtes attendu(e) ${multi ? formatPlageDatesLongue(session.date_debut, session.date_fin) : 'le ' + formatDateLongue(session.date_debut)} pour la formation intitulée :`);
+
+  let y = 237.8;
+  doc.setFont(POL, 'bold'); doc.setFontSize(16);
+  const titreLignes = doc.splitTextToSize(f?.denomination || '', 450 * MM);
+  titreLignes.forEach((l, i) => T(295, y + i * 20, 16, true, l, 'c'));
+  y += titreLignes.length * 20;
+  // bloc adresse : 3 lignes dans le modèle ; plus si l'adresse est plus longue
+  const yAdr = Math.max(291.6, y + 13.8);
+  T(53, yAdr, 12, false, "La formation se déroulera à l'adresse :");
+  const adresse = [session.lieu, session.adresse, [session.code_postal, session.ville].filter(Boolean).join(' ')].filter(Boolean);
+  const lignesAdr = adresse.length ? adresse : ['Adresse à confirmer'];
+  lignesAdr.forEach((l, i) => T(396, yAdr + i * 16, 14, true, l, 'c'));
+  const yDate = yAdr + Math.max(3, lignesAdr.length) * 16 + 15;
+  T(53, yDate + 3.8, 12, false, multi ? 'Elle se déroulera' : 'Elle se déroulera le');
+  T(multi ? 150 : 190, yDate, 16, true, multi ? formatPlageDatesLongue(session.date_debut, session.date_fin) : formatDateLongue(session.date_debut));
+  T(53, yDate + 37.8, 12, false, 'Selon les horaires suivant :');
+  const h = (session.horaires && session.horaires[0]) || {};
+  const yH = yDate + 68.8;
+  T(53, yH, 12, false, 'Heure de début :');      T(148, yH - 0.9, 14, true, h.debut || 'à préciser');
+  T(53, yH + 26, 12, false, 'Pause déjeuner :');  T(148, yH + 23.1, 14, true, h.pause_debut || '—');
+  T(190, yH + 23.1, 14, true, 'à');                T(217, yH + 23.1, 14, true, h.pause_fin || '—');
+  T(53, yH + 50, 12, false, 'Heure de fin :');     T(148, yH + 49.1, 14, true, h.fin || 'à préciser');
+  let yC = yH + 75;
+  let basConsignes = yC;
+  if (f?.consignes_convocation) {
+    T(53, yC, 12, true, "Afin de garantir le bon déroulement du stage, merci d'appliquer les consignes ci-dessous :");
+    let k = 0;
+    f.consignes_convocation.split('\n').map(l => l.replace(/^[•\t\s]+/, '')).filter(Boolean).forEach(ligne => {
+      doc.setFont(POL, 'normal'); doc.setFontSize(12);
+      doc.splitTextToSize('• ' + ligne, 490 * MM).forEach(l => { T(53, yC + 24 + k * 15, 12, false, l); k++; });
+    });
+    basConsignes = yC + 24 + k * 15;
+  }
+  const ySal = Math.max(623.6, basConsignes + 50);
+  T(53, ySal, 12, false, `Veuillez recevoir ${nomComplet} , l'expression de nos sincères salutations.`);
+  const nomOrg = S.organisation?.nom_commercial || String(S.organisation?.raison_sociale || '').replace(/^SARL\s+/i, '');
+  T(383, ySal + 31, 12, false, nomOrg);
+
+  // Tampon / signature de l'organisme (en bas à droite)
+  const tampon = S.organisation?._tamponDataUrl, signature = S.organisation?._signatureDataUrl;
+  [tampon, signature].forEach((img, idx) => {
+    if (!img) return;
+    try {
+      const pr = doc.getImageProperties(img);
+      let w = idx === 0 ? 150 : 90, hh = (pr.height / pr.width) * w;
+      const hMax = idx === 0 ? 88 : 50;
+      if (hh > hMax) { hh = hMax; w = (pr.width / pr.height) * hh; }
+      const x = idx === 0 ? 372 : 372 + 75 - w / 2, yy = idx === 0 ? ySal + 38 : ySal + 55;
+      doc.addImage(img, pr.fileType || 'PNG', x * MM, yy * MM, w * MM, hh * MM, idx === 0 ? 'tampon-organisme' : 'signature-organisme', 'FAST');
+    } catch (e) { /* image illisible : ignorée */ }
+  });
+
+  // QR codes PERSONNELS du stagiaire (voir positionnement.js) : positionnement puis règlement intérieur
   const qrs = [];
   if (participant.token_acces && typeof qrDataUrl === 'function' && typeof qrcode === 'function' && typeof urlPositionnement === 'function') {
     try {
-      if (f?.theme_positionnement) qrs.push({ img: qrDataUrl(urlPositionnement(participant), 6), titre: 'Questionnaire de positionnement', texte: 'À remplir avant la formation (quelques minutes)' });
-      if ((S.organisation?.reglement_interieur || '').trim()) qrs.push({ img: qrDataUrl(urlReglement(participant), 6), titre: 'Règlement intérieur', texte: 'À lire et à valider avant la formation' });
+      if (f?.theme_positionnement) qrs.push({ img: qrDataUrl(urlPositionnement(participant), 6), lignes: ['Je teste mes connaissances', 'avant la formation'] });
+      if ((S.organisation?.reglement_interieur || '').trim()) qrs.push({ img: qrDataUrl(urlReglement(participant), 6), lignes: ['Je consulte le règlement', 'intérieur avant la formation'] });
     } catch (e) { /* QR impossible : la convocation reste générée sans */ }
   }
-  if (qrs.length) {
-    if (y > 200) { doc.addPage(); y = 25; }
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5);
-    doc.text('Avant la formation, scannez avec votre téléphone (codes personnels, ne pas partager) :', MARGE, y); y += 5;
-    const taille = 34, ecart = (LARGEUR_UTILE - qrs.length * taille) / (qrs.length + 1);
-    qrs.forEach((q, i) => {
-      const x = MARGE + ecart * (i + 1) + taille * i;
-      doc.addImage(q.img, 'PNG', x, y, taille, taille, 'qr-conv-' + i, 'FAST');
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
-      doc.text(q.titre, x + taille / 2, y + taille + 4, { align: 'center' });
-      doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
-      doc.text(doc.splitTextToSize(q.texte, taille + 14), x + taille / 2, y + taille + 8, { align: 'center' });
-    });
-    y += taille + 24;
-  }
+  qrs.forEach((q, i) => {
+    const cx = i === 0 ? 109 : 227, taille = 54;
+    doc.addImage(q.img, 'PNG', (cx - taille / 2) * MM, (ySal + 37.4) * MM, taille * MM, taille * MM, 'qr-conv-' + i, 'FAST');
+    q.lignes.forEach((l, k) => T(cx, ySal + 92 + k * 14, 10, false, l, 'c'));
+  });
 
-  y = paragraphe(doc, `Veuillez recevoir ${st.civilite || ''} ${st.nom} , l'expression de nos sincères salutations.`, y, { apres: 10 });
-  doc.setFont('helvetica', 'bold');
-  doc.text(S.organisation.raison_sociale, 195, y, { align: 'right' });
+  // Pied de page en deux lignes (nom de l'organisme en gras bleu), comme le modèle
+  doc.__sansPied = true;
+  const pied = piedDePageTexte();
+  const idx = pied.search(/\s*[—–-]?\s*SIRET/i);
+  const l1 = idx > 0 ? pied.slice(0, idx).trim() : pied;
+  const l2 = idx > 0 ? pied.slice(idx).replace(/^\s*[—–-]\s*/, '').trim() : '';
+  const virg = l1.indexOf(',');
+  const nom1 = virg > 0 ? l1.slice(0, virg) : '', reste1 = virg > 0 ? l1.slice(virg) : l1;
+  doc.setFont(POL, 'bold'); doc.setFontSize(10); const wNom = doc.getTextWidth(nom1) / MM;
+  doc.setFont(POL, 'normal'); const wReste = doc.getTextWidth(reste1) / MM;
+  const x1 = 295.6 - (wNom + wReste) / 2;
+  T(x1, 754.5, 10, true, nom1, undefined, [36, 115, 181]);
+  T(x1 + wNom, 754.5, 10, false, reste1);
+  if (l2) T(295.6, 769.5, 10, false, l2, 'c');
 
   return telechargerOuOuvrir(doc, nomFichierDoc('Convocation', session, st), sansTelechargement);
 }

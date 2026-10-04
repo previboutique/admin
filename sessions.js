@@ -691,6 +691,7 @@ function lireLignesClientSession() {
 // ============================================================================
 
 async function ouvrirSession(id) {
+  if (typeof fsChargerPolices === 'function') fsChargerPolices().catch(() => {});   // police Carlito pour la convocation
   S.ongletActif = 'sessions';
   S.categorieActive = (typeof categorieDeLOnglet === 'function' && categorieDeLOnglet('sessions')?.id) || S.categorieActive;
   rendreMenuLateral();

@@ -21,6 +21,7 @@ async function ecranAccueil(vue) {
       <h3 style="margin-top:0;">Sessions à venir</h3>
       <div id="db-agenda">Chargement…</div>
     </div>
+    <div id="db-rattachements"></div>
     ${PEUT_GERER_SESSIONS() ? `<div class="carte">
       <h3 style="margin-top:0;">Espace client — à relancer <span style="font-weight:400;font-size:13px;color:#55636c;">(informations Passeport de prévention manquantes, conventions à signer)</span></h3>
       <div id="db-espace-client">Chargement…</div>
@@ -40,6 +41,9 @@ async function ecranAccueil(vue) {
     </div>`;
 
   chargerAgenda();
+  if (PEUT_GERER_SESSIONS() && typeof compterStagiairesSansClient === 'function') {
+    compterStagiairesSansClient().then(n => { const z = $('#db-rattachements'); if (z) z.innerHTML = bandeauRattachements(n); });
+  }
   if (PEUT_GERER_SESSIONS() && typeof chargerSuiviEspaceClientAccueil === 'function') chargerSuiviEspaceClientAccueil();
   chargerRecyclages();
 }

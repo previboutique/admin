@@ -18,6 +18,7 @@ async function ecranStagiaires(vue) {
         <button class="bouton" style="margin-left:6px;" onclick="ouvrirFicheStagiaire(null)">+ Nouveau stagiaire</button>
       </div>
     </div>
+    <div id="rt-bandeau"></div>
     <div id="stg-doublons"></div>
     <div class="carte">
       <div id="stagiaires-liste">Chargement…</div>
@@ -40,6 +41,9 @@ async function ecranStagiaires(vue) {
   }
   rendreListeStagiaires(window.__stagiairesTous);
   if (PEUT_GERER_SESSIONS()) rendreDoublonsStagiaires();
+  if (PEUT_GERER_SESSIONS() && typeof compterStagiairesSansClient === 'function') {
+    compterStagiairesSansClient().then(n => { const z = $('#rt-bandeau'); if (z) z.innerHTML = bandeauRattachements(n); });
+  }
 
   $('#stg-recherche').oninput = () => {
     const q = stgNormaliser($('#stg-recherche').value);

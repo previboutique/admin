@@ -235,7 +235,7 @@ function filtrerEtAfficherSessions() {
         <td style="padding:6px 8px;color:#55636c;font-variant-numeric:tabular-nums;">${esc(s.numero_session || '—')}</td>
         <td style="padding:6px 8px;">${formatDateFr(s.date_debut)}</td>
         <td style="padding:6px 8px;">${esc(s.formations_catalogue?.denomination || '')}</td>
-        <td style="padding:6px 8px;">${esc((s.__nomsClients || []).join(', ') || '—')}</td>
+        <td style="padding:6px 8px;">${(s.__nomsClients || []).length ? esc(s.__nomsClients.join(', ')) : '<span style="font-size:11px;background:#fdeeee;color:#b3261e;border-radius:10px;padding:1px 8px;">Sans client</span>'}</td>
         <td style="padding:6px 8px;text-align:right;${s.__nbStagiaires === 0 ? 'color:#b3261e;font-weight:600;' : ''}">${s.__nbStagiaires}</td>
         <td style="padding:6px 8px;">${esc(s.statut)}</td>
         ${PEUT_GERER_SESSIONS() ? `<td style="padding:6px 8px;">${celluleEspaceClientSession(s.id)}</td>` : ''}
@@ -596,6 +596,7 @@ async function ecranNouvelleSession(vue) {
 
     const lignesClients = lireLignesClientSession();
     if (lignesClients.erreur) { $('#ns-erreur').textContent = lignesClients.erreur; return; }
+    if (!lignesClients.valides.length) { $('#ns-erreur').textContent = 'Au moins un client est obligatoire (il sert aux conventions, à l\'espace client et au Passeport de prévention).'; return; }
 
     // Un seul jeu d'horaires pour toute la session (Convention/Convocation
     // n'affichent que le premier élément du tableau) — non stocké du tout si
@@ -1584,7 +1585,14 @@ async function rechercherStagiaires(texte, session) {
     </div>`;
 }
 
+function messageClientObligatoire() {
+  return (window.__sessionClients || []).length
+    ? 'Choisis d\'abord l\'entreprise de ce stagiaire (liste « Entreprise » au-dessus de la recherche).'
+    : 'Cette session n\'a pas encore de client : ajoute d\'abord un client à la session, puis inscris le stagiaire.';
+}
+
 async function ajouterParticipant(stagiaireId, sessionId, clientId) {
+  if (!clientId) { toast(messageClientObligatoire(), 'erreur'); return; }
   const { error } = await supa.from('session_participants').insert({
     organisation_id: S.organisation.id,
     session_id: sessionId,
@@ -1622,6 +1630,7 @@ async function creerEtAjouterStagiaire(sessionId, clientId) {
   const prenom = $('#new-prenom').value.trim();
   const dateNaissance = $('#new-naissance').value || null;
   if (!nom || !prenom) { toast('Nom et prénom obligatoires.', 'erreur'); return; }
+  if (!clientId) { toast(messageClientObligatoire(), 'erreur'); return; }
 
   const { data: stagiaire, error } = await supa.from('stagiaires').insert({
     organisation_id: S.organisation.id,

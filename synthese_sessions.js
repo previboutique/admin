@@ -83,6 +83,9 @@ function ssAgreger(sessions) {
   };
 }
 
+// Couleurs des bandeaux de domaine (Incendie, Secourisme, Électrique…).
+const DA_COULEURS_DOMAINES = ['#2a78d6', '#eb6834', '#1baf7a', '#8a5cc7', '#c9402f', '#2b8c9e', '#a07b00'];
+
 // Couleurs des 3 colonnes / séries : Mixte, Initial, Recyclage.
 const SS_COULEURS = ['#2a78d6', '#eb6834', '#1baf7a'];
 const SS_FONDS = ['#e8f0fb', '#fdeee6', '#e3f6ee'];
@@ -222,24 +225,52 @@ function rafraichirSyntheseSessions() {
   const sessionsInitial = sessions.filter(s => !estRecyclage(s.formation_id));
   const sessionsRecyclage = sessions.filter(s => estRecyclage(s.formation_id));
 
-  const famillesTriees = Object.entries(groupes)
-    .sort((a, b) => (b[1].initial.length + b[1].recyclage.length) - (a[1].initial.length + a[1].recyclage.length));
+  // Regroupement par domaine = catégorie de la fiche initiale du catalogue
+  // (Incendie, Secourisme, Électrique…), domaines triés par ordre alphabétique
+  // (« Non catégorisé » en dernier), formations les plus actives d'abord.
+  const domaines = {};
+  Object.entries(groupes).forEach(([cle, g]) => {
+    const brut = (parId[cle]?.categorie || '').trim();
+    const nom = brut || 'Non catégorisé';
+    const k = nom.toLowerCase();
+    (domaines[k] = domaines[k] || { nom, familles: [] }).familles.push([cle, g]);
+  });
+  const domainesTries = Object.values(domaines).sort((a, b) =>
+    (a.nom === 'Non catégorisé') - (b.nom === 'Non catégorisé') || a.nom.localeCompare(b.nom, 'fr'));
+  domainesTries.forEach(d => d.familles.sort((a, b) => (b[1].initial.length + b[1].recyclage.length) - (a[1].initial.length + a[1].recyclage.length)));
+
+  const fr = n => n === null ? '—' : (Math.round(n * 100) / 100).toFixed(2).replace('.', ',');
+  const resume = m => `${m.sessions} session${m.sessions > 1 ? 's' : ''} · ${m.stagiaires} stagiaire${m.stagiaires > 1 ? 's' : ''} · réussite ${m.taux === null ? '—' : m.taux + ' %'} · satisfaction ${m.note === null ? '—' : fr(m.note) + ' / 4'}`;
 
   zone.innerHTML = `
     <div class="carte">
       <h3 style="margin-top:0;">Ensemble des formations${annee ? ' — ' + esc(annee) : ''}</h3>
       ${sessions.length ? (() => { const m = ssAgreger(sessions); return ssPastilles(m) + ssTableau(m, ssAgreger(sessionsInitial), ssAgreger(sessionsRecyclage)); })() : '<p style="color:#55636c;">Aucune session sur cette période.</p>'}
     </div>
-    ${famillesTriees.map(([cle, g]) => {
-      const f = parId[cle];
+    ${domainesTries.length ? `<div style="text-align:right;font-size:12px;margin:-4px 0 8px;">
+      <a href="#" onclick="basculerToutesSections(false);return false;">Tout déplier</a> · <a href="#" onclick="basculerToutesSections(true);return false;">Tout replier</a></div>` : ''}
+    ${domainesTries.map((d, di) => {
+      const sessionsDomaine = d.familles.flatMap(([, g]) => [...g.initial, ...g.recyclage]);
+      const m = ssAgreger(sessionsDomaine);
+      const couleur = DA_COULEURS_DOMAINES[di % DA_COULEURS_DOMAINES.length];
       return `
-      <div class="carte">
-        <h3 style="margin-top:0;border-left:5px solid #2a78d6;padding-left:10px;">${esc(f?.denomination || 'Formation inconnue')}
-          <span style="font-weight:normal;font-size:12px;color:#55636c;">${esc(f?.categorie || '')}</span></h3>
-        <p style="font-size:12px;color:#55636c;margin:-4px 0 12px;">Fiches regroupées —
-          Initiale : <strong>${esc(f?.denomination || '?')}</strong> ·
-          Recyclage : <strong>${esc([...new Set(formations.filter(x => initialDe[x.id] === cle).map(x => x.denomination))].join(', ') || 'aucune fiche reliée')}</strong></p>
-        ${ssTableau(ssAgreger([...g.initial, ...g.recyclage]), ssAgreger(g.initial), ssAgreger(g.recyclage))}
-      </div>`;
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:22px 0 8px;padding:8px 14px;border-radius:8px;background:${couleur};color:#fff;">
+        <strong style="font-size:15px;text-transform:uppercase;letter-spacing:.04em;">${esc(d.nom)}</strong>
+        <span style="font-size:12px;opacity:.95;">${d.familles.length} formation${d.familles.length > 1 ? 's' : ''} — ${esc(resume(m))}</span>
+      </div>
+      ${d.familles.map(([cle, g]) => {
+        const f = parId[cle];
+        return `
+        <div class="carte ss-formation" data-cle="${esc(cle)}" data-resume="${esc(resume(ssAgreger([...g.initial, ...g.recyclage])))}" style="border-left:5px solid ${couleur};">
+          <h3 style="margin-top:0;">${esc(f?.denomination || 'Formation inconnue')}</h3>
+          <p style="font-size:12px;color:#55636c;margin:-4px 0 12px;">Fiches regroupées —
+            Initiale : <strong>${esc(f?.denomination || '?')}</strong> ·
+            Recyclage : <strong>${esc([...new Set(formations.filter(x => initialDe[x.id] === cle).map(x => x.denomination))].join(', ') || 'aucune fiche reliée')}</strong></p>
+          ${ssTableau(ssAgreger([...g.initial, ...g.recyclage]), ssAgreger(g.initial), ssAgreger(g.recyclage))}
+        </div>`;
+      }).join('')}`;
     }).join('')}`;
+
+  // Chaque formation est enroulée d'office, avec ses chiffres clés en résumé.
+  zone.querySelectorAll('.ss-formation').forEach(c => rendreRepliable(c, 'ss-' + c.dataset.cle, true, esc(c.dataset.resume)));
 }

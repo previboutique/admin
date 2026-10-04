@@ -9,7 +9,14 @@ console.log('%c© 2026 Jérémy Bizeul / SARL Prévisecours — Tous droits rés
 const SUPABASE_URL = 'https://kzahahrnauynnrfznkje.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_VpOYj7KajWRHJKyjPyLh_g_mgabFpgZ';
 // Session volontairement séparée de celle de l'application interne (même site, clé de stockage différente).
-const supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { storageKey: 'sb-espace-client-auth', persistSession: true } });
+// Mode APERÇU (personnel de l'organisme) : espace-client.html?apercu=<id du client>.
+// On réutilise alors la session de l'application interne (clé de stockage par défaut) et on envoie
+// l'en-tête « x-apercu-client » : la base répond comme pour ce client, en LECTURE SEULE
+// (voir patch_2026-10-05e_apercu_client.sql). Aucune écriture, aucune signature, aucune déconnexion.
+const APERCU = (() => { const v = new URLSearchParams(location.search).get('apercu') || ''; return /^[0-9a-f-]{36}$/i.test(v) ? v.toLowerCase() : null; })();
+const supa = APERCU
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: true, autoRefreshToken: false, detectSessionInUrl: false }, global: { headers: { 'x-apercu-client': APERCU } } })
+  : window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { storageKey: 'sb-espace-client-auth', persistSession: true } });
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -31,6 +38,12 @@ function message(html) { $('#contenu').innerHTML = html; }
 // Démarrage / connexion
 // ---------------------------------------------------------------------------
 async function demarrer() {
+  if (APERCU) {
+    const { data: { session } } = await supa.auth.getSession();
+    if (!session) { message('<div class="carte"><p><strong>Aperçu impossible.</strong> Connectez-vous d\'abord à l\'application Admin Formation (dans cet onglet du navigateur ou un autre, sur ce même site), puis relancez l\'aperçu depuis la fiche client.</p></div>'); return; }
+    await chargerEspace();
+    return;
+  }
   supa.auth.onAuthStateChange((evenement) => { if (evenement === 'PASSWORD_RECOVERY') afficherNouveauMotDePasse(true); });
   const { data: { session } } = await supa.auth.getSession();
   if (session) await chargerEspace(); else afficherConnexion();
@@ -92,6 +105,10 @@ function afficherNouveauMotDePasse(depuisLien) {
 
 async function chargerEspace() {
   const { data, error } = await supa.rpc('client_contexte');
+  if (APERCU && (error || !data)) {
+    message(`<div class="carte"><p class="erreur">Aperçu impossible : ${esc(error?.message || 'client introuvable ou accès refusé')}.</p><p class="info">Si votre connexion à l'application a expiré, reconnectez-vous dans l'application puis relancez l'aperçu. Le patch « aperçu espace client » (2026-10-05e) doit aussi avoir été appliqué dans Supabase.</p></div>`);
+    return;
+  }
   if (error || !data) {
     await supa.auth.signOut();
     afficherConnexion('Ce compte n\'est pas rattaché à un espace client (ou il a été désactivé).');
@@ -101,8 +118,14 @@ async function chargerEspace() {
   $('#entete').style.display = '';
   $('#titre').textContent = CTX.client;
   $('#sous-titre').textContent = CTX.organisme + ' — espace client';
-  $('#btn-quitter').onclick = async () => { await supa.auth.signOut(); CTX = null; afficherConnexion(); };
-  $('#btn-mdp').onclick = () => afficherNouveauMotDePasse(false);
+  if (APERCU) {
+    $('#btn-quitter').style.display = 'none'; $('#btn-mdp').style.display = 'none';
+    $('#sous-titre').textContent = CTX.organisme + ' — APERÇU en lecture seule (ce que voit ce client)';
+    $('#entete').style.background = '#8a5a00';
+  } else {
+    $('#btn-quitter').onclick = async () => { await supa.auth.signOut(); CTX = null; afficherConnexion(); };
+    $('#btn-mdp').onclick = () => afficherNouveauMotDePasse(false);
+  }
   await afficherSessions();
 }
 
@@ -189,6 +212,10 @@ function rendreSessionClient() {
   document.querySelectorAll('[data-sign]').forEach(b => { b.onclick = () => ouvrirSignature(b.dataset.sign); });
   document.querySelectorAll('[data-nomnaiss]').forEach(b => { b.onclick = () => { $('#nn-' + b.dataset.nomnaiss).value = STAGIAIRES.find(x => x.id === b.dataset.nomnaiss).nom; }; });
   document.querySelectorAll('[data-enreg]').forEach(b => { b.onclick = () => enregistrerStagiaire(b.dataset.enreg); });
+  if (APERCU) {   // lecture seule : rien ne peut être saisi, enregistré ni signé
+    document.querySelectorAll('#liste-stagiaires input, #liste-stagiaires button, [data-sign], [data-nomnaiss]').forEach(e => { e.disabled = true; e.style.pointerEvents = 'none'; e.title = 'Aperçu en lecture seule'; });
+    document.querySelectorAll('[data-sign]').forEach(b => { b.style.opacity = '.5'; });
+  }
 }
 
 function etatStagiaire(st) {

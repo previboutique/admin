@@ -274,6 +274,8 @@ async function ouvrirFicheClient(id) {
     ${PEUT_GERER_SESSIONS() ? `
     <div class="carte" style="max-width:640px;">
       <h3 style="margin-top:0;">Accès à l'espace client</h3>
+      <p style="margin:0 0 10px;"><button class="bouton" style="font-size:13px;padding:6px 12px;" onclick="window.open('espace-client.html?apercu=${client.id}', '_blank')">Voir l'espace client tel que ce client le voit</button>
+        <span style="font-size:12px;color:#55636c;"> Aperçu en lecture seule : rien ne peut être modifié ni signé.</span></p>
       <div id="acces-client-zone">Chargement…</div>
     </div>` : ''}
 

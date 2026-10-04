@@ -110,6 +110,27 @@ async function rtParLots(table, colonne, ids, selection, taille) {
   return out;
 }
 
+
+// Sessions dont les inscrits ont une entreprise que la session elle-même ne connaît pas
+// (ex. en-tête « sans client » alors que l'espace client montre l'entreprise des inscrits).
+async function rtSessionsAReLier() {
+  const out = [];
+  for (let debut = 0; debut < 20000; debut += 500) {
+    const { data, error } = await supa.from('sessions_formation')
+      .select('id, numero_session, date_debut, client_id, formations_catalogue(denomination), session_clients(client_id), session_participants(client_id)')
+      .order('date_debut', { ascending: false }).range(debut, debut + 499);
+    if (error) throw error;
+    (data || []).forEach(s => {
+      const connus = new Set((s.session_clients || []).map(x => x.client_id));
+      const compte = new Map();
+      (s.session_participants || []).forEach(p => { if (p.client_id && !connus.has(p.client_id)) compte.set(p.client_id, (compte.get(p.client_id) || 0) + 1); });
+      if (compte.size) out.push({ session: s, manquants: compte });
+    });
+    if (!data || data.length < 500) break;
+  }
+  return out;
+}
+
 async function rtCharger() {
   const { data: stagiaires, error: e1 } = await supa.from('stagiaires').select('id, nom, prenom, email').is('client_id', null).order('nom').limit(3000);
   if (e1) throw e1;
@@ -132,25 +153,28 @@ async function rtCharger() {
     .select('id, numero_session, date_debut, date_fin, statut, formations_catalogue(denomination), session_clients(clients(raison_sociale)), session_participants(stagiaires(nom, prenom))')
     .lt('date_debut', '2000-01-01').order('numero_session').limit(1000);
   if (e4) throw e4;
-  return { stagiaires: stagiaires || [], participants, sessions, clients: clients || [], participantsSessionsSansClient, inscriptions, nbInscriptionsSansClient: (inscrSansClient || []).length, sessions1900: sessions1900 || [] };
+  const sessionsAReLier = await rtSessionsAReLier();
+  return { stagiaires: stagiaires || [], participants, sessions, clients: clients || [], participantsSessionsSansClient, inscriptions, sessionsAReLier, nbInscriptionsSansClient: (inscrSansClient || []).length, sessions1900: sessions1900 || [] };
 }
 
 // ----------------------------------------------------------------------------
 // Affichage
 // ----------------------------------------------------------------------------
 async function compterStagiairesSansClient() {
-  const [a, b, c] = await Promise.all([
+  const [a, b, c, aRelier] = await Promise.all([
     supa.from('stagiaires').select('id', { count: 'exact', head: true }).is('client_id', null),
     supa.from('session_participants').select('id', { count: 'exact', head: true }).is('client_id', null),
     supa.from('sessions_formation').select('id', { count: 'exact', head: true }).lt('date_debut', '2000-01-01'),
+    rtSessionsAReLier().catch(() => []),
   ]);
-  return { stagiaires: a.error ? 0 : (a.count || 0), inscriptions: b.error ? 0 : (b.count || 0), sessions1900: c.error ? 0 : (c.count || 0) };
+  return { stagiaires: a.error ? 0 : (a.count || 0), inscriptions: b.error ? 0 : (b.count || 0), sessions1900: c.error ? 0 : (c.count || 0), sessionsAReLier: aRelier.length };
 }
 
 function bandeauRattachements(n) {
   const nb = typeof n === 'object' ? n : { stagiaires: n, inscriptions: 0 };
-  if (!nb.stagiaires && !nb.inscriptions && !nb.sessions1900) return '';
+  if (!nb.stagiaires && !nb.inscriptions && !nb.sessions1900 && !nb.sessionsAReLier) return '';
   const morceaux = [];
+  if (nb.sessionsAReLier) morceaux.push(`<strong>${nb.sessionsAReLier}</strong> session(s) qui ne connaissent pas l'entreprise de leurs inscrits`);
   if (nb.sessions1900) morceaux.push(`<strong>${nb.sessions1900}</strong> session(s) datée(s) 01/01/1900`);
   if (nb.stagiaires) morceaux.push(`<strong>${nb.stagiaires}</strong> fiche(s) stagiaire sans entreprise`);
   if (nb.inscriptions) morceaux.push(`<strong>${nb.inscriptions}</strong> inscription(s) à une session sans entreprise`);
@@ -178,7 +202,7 @@ async function ouvrirRattachements() {
   window.__rt = { r, ri, clients: donnees.clients, donnees };
 
   const nbSess = r.sessionsSansClient.size;
-  const total = donnees.stagiaires.length + ri.groupes.length + donnees.sessions1900.length;
+  const total = donnees.stagiaires.length + ri.groupes.length + donnees.sessions1900.length + donnees.sessionsAReLier.length;
   const { data: lots } = await supa.from('rattachements_lots').select('*').order('created_at', { ascending: false }).limit(8);
 
   const ligneEvident = (x, i) => `
@@ -204,6 +228,19 @@ async function ouvrirRattachements() {
         <li><strong>${r.orphelins.length}</strong> stagiaire(s) sans aucune session</li>
       </ul>
     </div>
+
+    ${donnees.sessionsAReLier.length ? `<div class="carte"><h3 style="margin-top:0;">Sessions à relier à l'entreprise de leurs inscrits (${donnees.sessionsAReLier.length})</h3>
+      <p style="font-size:12px;color:#55636c;margin:0 0 8px;">Ces sessions affichent « sans client » (ou n'ont pas toutes leurs entreprises), alors que leurs inscrits ont une entreprise. L'entreprise est ajoutée à la session (sans tarif ni devis : à compléter dans la session).</p>
+      <table style="width:100%;border-collapse:collapse;font-size:13px;"><tbody>${donnees.sessionsAReLier.map((g, i) => `
+        <tr style="border-top:1px solid #eee;"><td style="padding:5px 8px;"><input type="checkbox" class="rt-rel" data-i="${i}" checked style="width:auto;"></td>
+          <td style="padding:5px 8px;">${rtSessionLibelle(g.session)}</td>
+          <td style="padding:5px 8px;">${[...g.manquants].map(([c, n]) => `<strong>${esc(r.cliNom.get(c) || ri.cliNom.get(c) || '?')}</strong> (${n} inscrit${n > 1 ? 's' : ''})`).join(', ')}</td>
+          <td style="padding:5px 8px;"><button class="bouton" style="font-size:12px;padding:4px 10px;" onclick="rtAppliquerRelier([${i}])">Appliquer cette ligne</button></td></tr>`).join('')}
+      </tbody></table>
+      <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+        <button class="bouton" style="background:#eee;color:#333;font-size:13px;" onclick="document.querySelectorAll('.rt-rel').forEach(c=>c.checked=true)">Tout cocher</button>
+        <button class="bouton" style="background:#eee;color:#333;font-size:13px;" onclick="document.querySelectorAll('.rt-rel').forEach(c=>c.checked=false)">Tout décocher</button>
+        <button class="bouton" onclick="rtAppliquerRelier()">Aperçu et application</button></div></div>` : ''}
 
     ${donnees.sessions1900.length ? `<div class="carte"><h3 style="margin-top:0;">Sessions à dater (${donnees.sessions1900.length})</h3>
       <p style="font-size:12px;color:#55636c;margin:0 0 8px;">Ces sessions ont une date de remplacement (01/01/1900) venue d'un import. Saisissez la vraie date : la session est corrigée sur place, son numéro est recalculé et l'ancienne date reste dans l'historique de la fiche. Laissez la date de fin vide pour une formation d'un jour.</p>
@@ -477,4 +514,12 @@ async function rtCorrigerToutesDates() {
   }
   toast(`${ok} session(s) corrigée(s)` + (erreurs.length ? ` — ${erreurs.length} erreur(s) : ${erreurs[0]}` : ''), erreurs.length ? 'erreur' : undefined);
   await ouvrirRattachements();
+}
+
+function rtAppliquerRelier(indices) {
+  const { donnees } = window.__rt;
+  const idx = indices || [...document.querySelectorAll('.rt-rel:checked')].map(c => Number(c.dataset.i));
+  const actions = [];
+  idx.forEach(i => { const g = donnees.sessionsAReLier[i]; g.manquants.forEach((n, c) => actions.push({ type: 'session_client', session_id: g.session.id, client_id: c })); });
+  rtAppliquer(actions, 'Sessions : ajout de l\'entreprise de leurs inscrits');
 }

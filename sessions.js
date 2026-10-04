@@ -701,11 +701,16 @@ async function ouvrirSession(id) {
 
   if (error) { DEBUG.erreur('ouvrirSession', error); vue.innerHTML = '<div class="carte">Session introuvable ou accès refusé.</div>'; return; }
 
-  const [{ data: participants }, { data: sessionClients }, { data: formateursDisponibles }] = await Promise.all([
+  const [{ data: participants }, { data: sessionClients }, { data: formateursDisponibles }, { data: sessionOrigine }, { data: sessionsSuivantes }] = await Promise.all([
     supa.from('session_participants').select('*, stagiaires(civilite, nom, prenom, date_naissance), clients(raison_sociale, ville)').eq('session_id', id),
     supa.from('session_clients').select('*, clients(raison_sociale, ville)').eq('session_id', id).order('created_at'),
     PEUT_GERER_SESSIONS() ? supa.from('profils').select('id, nom, prenom, formateur_externe').eq('actif', true).order('nom') : Promise.resolve({ data: [] }),
+    session.session_origine_id
+      ? supa.from('sessions_formation').select('id, numero_session, date_debut, date_fin, motif_report, commentaire_report').eq('id', session.session_origine_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+    supa.from('sessions_formation').select('id, numero_session, date_debut, date_fin').eq('session_origine_id', id),
   ]);
+  const sessionSuivante = (sessionsSuivantes || [])[0] || null;
 
   window.__sessionClients = sessionClients || [];
   const nomsClients = (sessionClients || []).map(sc => sc.clients?.raison_sociale).filter(Boolean);
@@ -731,11 +736,15 @@ async function ouvrirSession(id) {
       </div>
       <div style="text-align:right;">
         <button class="bouton" style="background:#eee;color:#333;" onclick="allerA('sessions')">← Retour</button>
+        ${PEUT_GERER_SESSIONS() && !sessionSuivante ? `
+        <button class="bouton" style="margin-left:8px;" onclick="ouvrirReportSession('${session.id}')">Modifier la date</button>` : ''}
         ${PEUT_GERER_SESSIONS() && (session.statut !== 'terminee' || (participants || []).length === 0) ? `
         <button class="bouton" style="background:#fdeeee;color:#b3261e;margin-left:8px;" onclick="ouvrirConfirmationSuppression('${session.id}', ${(participants || []).length})">Supprimer</button>` : ''}
       </div>
     </div>
 
+    ${rendreHistoriqueDates(session, sessionOrigine, sessionSuivante)}
+    <div id="report-zone"></div>
     <div id="suppression-zone"></div>
 
     ${PEUT_GERER_SESSIONS() ? `
@@ -798,6 +807,8 @@ async function ouvrirSession(id) {
       <p style="font-size:12px;color:#55636c;margin:0 0 8px;">Sélectionne les documents à télécharger en une fois (ZIP) ou à envoyer par email au client.</p>
       <div id="selection-documents">Chargement…</div>
     </div>
+
+    <div class="carte" id="synthese-zone"></div>
 
     <div class="carte">
       <h3 style="margin-top:0;">Participants</h3>
@@ -956,6 +967,110 @@ function ouvrirConfirmationSuppression(sessionId, nbStagiaires) {
   };
 }
 
+// ============================================================================
+// REPORT / CHANGEMENT DE DATE D'UNE SESSION
+// Report (client, indisponibilité, annulée puis reprogrammée, autre) : la
+// session d'origine est conservée (annulée, ancien numéro et ancienne date)
+// et une nouvelle session est créée avec la nouvelle date et un nouveau
+// numéro (RPC reporter_session). Erreur de saisie : correction sur place.
+// ============================================================================
+const MOTIFS_REPORT = [
+  { valeur: 'client', libelle: 'Reportée à la demande du client' },
+  { valeur: 'indisponibilite', libelle: 'Reportée (formateur / salle indisponible)' },
+  { valeur: 'annulee_reprogrammee', libelle: 'Annulée puis reprogrammée' },
+  { valeur: 'erreur_saisie', libelle: "Correction d'une erreur de saisie" },
+  { valeur: 'autre', libelle: 'Autre motif (à préciser)' },
+];
+const libelleMotifReport = v => (MOTIFS_REPORT.find(m => m.valeur === v) || {}).libelle || v || '';
+
+function plageDatesCourte(s) {
+  return formatDateFr(s.date_debut) + (s.date_fin && s.date_fin !== s.date_debut ? ' → ' + formatDateFr(s.date_fin) : '');
+}
+
+// Bandeau d'historique affiché en haut de la fiche : lien vers la session
+// d'origine / la session de reprogrammation, et corrections de date faites
+// sur place.
+function rendreHistoriqueDates(session, origine, suivante) {
+  const lignes = [];
+  if (origine) {
+    lignes.push(`Reprogrammation de la session n° <a href="#" onclick="ouvrirSession('${origine.id}');return false;">${esc(origine.numero_session || '—')}</a>
+      (prévue le ${esc(plageDatesCourte(origine))}) — motif : ${esc(libelleMotifReport(origine.motif_report))}${origine.commentaire_report ? ' (' + esc(origine.commentaire_report) + ')' : ''}.`);
+  }
+  if (suivante) {
+    lignes.push(`Cette session a été <strong>reportée</strong> (${esc(libelleMotifReport(session.motif_report))}${session.commentaire_report ? ' — ' + esc(session.commentaire_report) : ''}) :
+      voir la nouvelle session n° <a href="#" onclick="ouvrirSession('${suivante.id}');return false;">${esc(suivante.numero_session || '—')}</a> du ${esc(plageDatesCourte(suivante))}.`);
+  }
+  (Array.isArray(session.historique_dates) ? session.historique_dates : []).forEach(h => {
+    lignes.push(`Date corrigée le ${esc(new Date(h.le).toLocaleDateString('fr-FR'))}${h.par_nom ? ' par ' + esc(h.par_nom) : ''} :
+      ${esc(h.ancienne_date_debut ? formatDateFr(h.ancienne_date_debut) : '—')} (n° ${esc(h.ancien_numero || '—')}) → ${esc(h.nouveau_numero || '—')}${h.commentaire ? ' — ' + esc(h.commentaire) : ''}.`);
+  });
+  if (!lignes.length) return '';
+  return `<div class="carte" style="background:#fff8e6;border:1px solid #f0d58c;font-size:13px;">
+    ${lignes.map(l => `<div style="padding:2px 0;">${l}</div>`).join('')}
+  </div>`;
+}
+
+function ouvrirReportSession(sessionId) {
+  const s = window.__sessionCourante;
+  if (!s || s.id !== sessionId) { toast('Recharge la session puis réessaie.', 'erreur'); return; }
+  // Une session terminée ne peut qu'être corrigée sur place (pas reportée).
+  const motifsPossibles = s.statut === 'terminee' ? MOTIFS_REPORT.filter(m => m.valeur === 'erreur_saisie') : MOTIFS_REPORT;
+
+  $('#report-zone').innerHTML = `
+    <div class="carte" style="max-width:620px;">
+      <h3 style="margin-top:0;">Modifier la date de la session</h3>
+      <p style="font-size:13px;color:#55636c;margin:0 0 10px;">Actuellement : ${esc(plageDatesCourte(s))} — n° ${esc(s.numero_session || '—')}</p>
+      <div style="display:flex;gap:10px;">
+        <div style="flex:1;"><label for="rp-debut">Nouvelle date de début</label><input id="rp-debut" type="date"></div>
+        <div style="flex:1;"><label for="rp-fin">Nouvelle date de fin</label><input id="rp-fin" type="date"></div>
+      </div>
+      <label for="rp-motif">Motif</label>
+      <select id="rp-motif">
+        ${motifsPossibles.map(m => `<option value="${m.valeur}">${esc(m.libelle)}</option>`).join('')}
+      </select>
+      <label for="rp-commentaire">Précision <span id="rp-commentaire-oblig" style="font-weight:normal;color:#55636c;">(facultatif)</span></label>
+      <input id="rp-commentaire" placeholder="ex. demande de la DRH, formateur malade…">
+      <p id="rp-explication" style="font-size:12px;color:#55636c;margin:8px 0 0;"></p>
+      <button class="bouton" id="rp-valider" style="margin-top:12px;">Valider</button>
+      <button class="bouton" style="margin-top:12px;margin-left:8px;background:#eee;color:#333;" onclick="$('#report-zone').innerHTML=''">Annuler</button>
+      <div class="erreur" id="rp-erreur"></div>
+    </div>`;
+
+  const majExplication = () => {
+    const motif = $('#rp-motif').value;
+    $('#rp-commentaire-oblig').textContent = motif === 'autre' ? '(obligatoire)' : '(facultatif)';
+    $('#rp-explication').textContent = motif === 'erreur_saisie'
+      ? "La date est corrigée sur cette même session. Le numéro est recalculé si le mois change, et l'ancienne date est conservée dans l'historique de la fiche."
+      : "La session actuelle est conservée avec son ancienne date et son numéro, et passe en « annulée ». Une nouvelle session est créée avec la nouvelle date et un nouveau numéro (mêmes formation, client(s), formateur, lieu, tarifs et stagiaires). Les documents déjà générés restent sur l'ancienne session : il faudra régénérer ceux de la nouvelle.";
+  };
+  $('#rp-motif').onchange = majExplication;
+  majExplication();
+
+  $('#rp-valider').onclick = async () => {
+    const debut = $('#rp-debut').value;
+    const fin = $('#rp-fin').value || debut;
+    const motif = $('#rp-motif').value;
+    const commentaire = $('#rp-commentaire').value.trim();
+    if (!debut) { $('#rp-erreur').textContent = 'Indique la nouvelle date de début.'; return; }
+    if (fin < debut) { $('#rp-erreur').textContent = 'La date de fin ne peut pas précéder la date de début.'; return; }
+    if (motif === 'autre' && !commentaire) { $('#rp-erreur').textContent = 'Précise le motif.'; return; }
+    if (motif !== 'erreur_saisie' && !confirm(`Reporter cette session au ${formatDateFr(debut)} ? L'actuelle sera conservée (annulée) et une nouvelle session sera créée.`)) return;
+
+    $('#rp-valider').disabled = true;
+    const { data: nouvelleId, error } = await supa.rpc('reporter_session', {
+      p_session: sessionId, p_date_debut: debut, p_date_fin: fin, p_motif: motif, p_commentaire: commentaire || null,
+    });
+    if (error) {
+      DEBUG.erreur('reporterSession', error);
+      $('#rp-erreur').textContent = 'Erreur : ' + error.message;
+      $('#rp-valider').disabled = false;
+      return;
+    }
+    toast(motif === 'erreur_saisie' ? 'Date corrigée.' : 'Session reportée — nouvelle session créée.');
+    ouvrirSession(nouvelleId);
+  };
+}
+
 function rendreParticipants(session, participants) {
   // Mémorisés tout de suite (avant le retour anticipé ci-dessous) : les
   // boutons Convention/Convocation/AFF/Certificat de l'écran s'appuient sur
@@ -964,6 +1079,7 @@ function rendreParticipants(session, participants) {
   window.__participantsCourants = participants;
   window.__sessionCourante = session;
 
+  rendreSynthese();
   const zone = $('#participants-liste');
   if (participants.length === 0) { zone.innerHTML = '<p style="color:#55636c;">Aucun stagiaire inscrit.</p>'; return; }
 
@@ -988,6 +1104,9 @@ function rendreParticipants(session, participants) {
     sel.onchange = async () => {
       const { error } = await supa.from('session_participants').update({ statut: sel.value }).eq('id', sel.dataset.pid);
       if (error) { DEBUG.erreur('maj statut participant', error); toast('Erreur : ' + error.message, 'erreur'); return; }
+      const pp = window.__participantsCourants.find(x => x.id === sel.dataset.pid);
+      if (pp) pp.statut = sel.value;
+      rendreSynthese();
       toast('Statut mis à jour.');
     };
   });
@@ -1044,6 +1163,9 @@ async function enregistrerFise(participantId) {
   });
   const { error } = await supa.from('session_participants').update({ grille_certification: grille }).eq('id', participantId);
   if (error) { DEBUG.erreur('enregistrerFise', error); toast('Erreur : ' + error.message, 'erreur'); return; }
+  const pf = window.__participantsCourants.find(x => x.id === participantId);
+  if (pf) pf.grille_certification = grille;
+  rendreSynthese();
   toast('FISE enregistrée.');
 }
 
@@ -1067,6 +1189,8 @@ function toggleEvaluation(participantId) {
             ${[1,2,3,4].map(n => `<option value="${n}" ${reponses[q] == n ? 'selected' : ''}>${n}</option>`).join('')}
           </select>
         </div>`).join('')}
+      <label for="eval-commentaire-${participantId}" style="margin-top:8px;">Commentaire du stagiaire (facultatif)</label>
+      <textarea id="eval-commentaire-${participantId}" rows="3" placeholder="Remarques libres du stagiaire sur la formation…">${esc(p.commentaire_evaluation || '')}</textarea>
       <button class="bouton" style="margin-top:10px;padding:6px 12px;font-size:13px;" onclick="enregistrerEvaluation('${participantId}')">Enregistrer</button>
     </div>`;
   zone.style.display = 'block';
@@ -1080,11 +1204,107 @@ async function enregistrerEvaluation(participantId) {
     if (sel.value) { reponses[sel.dataset.q] = Number(sel.value); total += Number(sel.value); n++; }
   });
   const noteMoyenne = n ? Math.round((total / n) * 100) / 100 : null;
+  const commentaire = ($('#eval-commentaire-' + participantId).value || '').trim() || null;
   const { error } = await supa.from('session_participants')
-    .update({ evaluation_satisfaction: reponses, note_moyenne: noteMoyenne })
+    .update({ evaluation_satisfaction: reponses, note_moyenne: noteMoyenne, commentaire_evaluation: commentaire })
     .eq('id', participantId);
   if (error) { DEBUG.erreur('enregistrerEvaluation', error); toast('Erreur : ' + error.message, 'erreur'); return; }
+  const p = (window.__participantsCourants || []).find(x => x.id === participantId);
+  if (p) { p.evaluation_satisfaction = reponses; p.note_moyenne = noteMoyenne; p.commentaire_evaluation = commentaire; }
   toast('Évaluation enregistrée.');
+  rendreSynthese();
+}
+
+// ============================================================================
+// SYNTHÈSE DES ÉVALUATIONS DE LA SESSION (satisfaction + réussite)
+// ============================================================================
+
+// Radar SVG (échelle 0 à 4), sans bibliothèque externe.
+function radarSvg(libelles, valeurs) {
+  const W = 560, H = 400, cx = W / 2, cy = H / 2 + 5, R = 120, n = libelles.length;
+  const pt = (i, r) => {
+    const ang = -Math.PI / 2 + (2 * Math.PI * i) / n;
+    return [cx + r * Math.cos(ang), cy + r * Math.sin(ang)];
+  };
+  const polygone = r => Array.from({ length: n }, (_, i) => pt(i, r).join(',')).join(' ');
+  let s = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;max-width:560px;height:auto;font-family:Arial,sans-serif;">`;
+  for (let k = 1; k <= 4; k++) {
+    s += `<polygon points="${polygone(R * k / 4)}" fill="none" stroke="#3b6fb6" stroke-width="0.8"/>`;
+    s += `<text x="${cx + 3}" y="${cy - R * k / 4 + 10}" font-size="9" fill="#888">${k},00</text>`;
+  }
+  for (let i = 0; i < n; i++) {
+    const [x, y] = pt(i, R);
+    s += `<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="#3b6fb6" stroke-width="0.8"/>`;
+    const [lx, ly] = pt(i, R + 14);
+    const anchor = Math.abs(lx - cx) < 8 ? 'middle' : (lx > cx ? 'start' : 'end');
+    // libellé coupé en 2 lignes
+    const mots = libelles[i].split(' ');
+    let l1 = '', l2 = '';
+    mots.forEach(m => { if ((l1 + ' ' + m).trim().length <= 24 && !l2) l1 = (l1 + ' ' + m).trim(); else l2 = (l2 + ' ' + m).trim(); });
+    const dy = ly < cy - R * 0.9 ? -8 : (ly > cy + R * 0.9 ? 8 : 0);
+    s += `<text x="${lx}" y="${ly + dy}" font-size="9.5" text-anchor="${anchor}" fill="#222">${esc(l1)}${l2 ? `<tspan x="${lx}" dy="11">${esc(l2)}</tspan>` : ''}</text>`;
+  }
+  const pts = valeurs.map((v, i) => pt(i, R * (v || 0) / 4).join(',')).join(' ');
+  s += `<polygon points="${pts}" fill="rgba(60,170,90,0.35)" stroke="#22a350" stroke-width="2"/>`;
+  return s + '</svg>';
+}
+
+function rendreSynthese() {
+  const zone = $('#synthese-zone');
+  if (!zone) return;
+  const participants = window.__participantsCourants || [];
+  const fr = n => (Math.round(n * 100) / 100).toFixed(2).replace('.', ',');
+
+  // --- Satisfaction : nombre de réponses 1 à 4 par critère, moyenne /4
+  const evalues = participants.filter(p => p.evaluation_satisfaction && Object.keys(p.evaluation_satisfaction).length);
+  const lignes = QUESTIONS_SATISFACTION.map(q => {
+    const c = [0, 0, 0, 0];
+    evalues.forEach(p => { const v = Number(p.evaluation_satisfaction[q]); if (v >= 1 && v <= 4) c[v - 1]++; });
+    const nb = c.reduce((a, b) => a + b, 0);
+    const moy = nb ? (c[0] + 2 * c[1] + 3 * c[2] + 4 * c[3]) / nb : null;
+    return { q, c, moy };
+  });
+  const moyennes = lignes.filter(l => l.moy !== null).map(l => l.moy);
+  const noteTotale = moyennes.length ? moyennes.reduce((a, b) => a + b, 0) / moyennes.length : null;
+  const commentaires = participants.filter(p => (p.commentaire_evaluation || '').trim());
+
+  const cell = 'border:1px solid #222;padding:3px 8px;';
+  const satisfaction = !evalues.length
+    ? '<p style="color:#55636c;font-size:13px;">Aucune évaluation de satisfaction saisie pour le moment.</p>'
+    : `<div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;">
+        <div>
+          <table style="border-collapse:collapse;font-size:13px;">
+            <tr><td style="border:none;"></td>${[1,2,3,4].map(n => `<td style="${cell}text-align:center;">${n}</td>`).join('')}<td style="${cell}text-align:center;">Total</td></tr>
+            ${lignes.map(l => `<tr><td style="${cell}">${esc(l.q)}</td>${l.c.map(x => `<td style="${cell}text-align:center;">${x}</td>`).join('')}<td style="${cell}text-align:center;white-space:nowrap;">${l.moy === null ? '—' : fr(l.moy) + ' / 4'}</td></tr>`).join('')}
+          </table>
+          <p style="margin:10px 0 0;font-size:14px;"><strong>Note totale : ${noteTotale === null ? '—' : fr(noteTotale) + ' / 4'}</strong>
+            <span style="color:#55636c;font-size:12px;">(${evalues.length} stagiaire${evalues.length > 1 ? 's' : ''} sur ${participants.length} ayant répondu)</span></p>
+        </div>
+        <div style="flex:1;min-width:300px;">${radarSvg(QUESTIONS_SATISFACTION, lignes.map(l => l.moy))}</div>
+      </div>`;
+
+  // --- Réussite : statut "certifié" = réussite, "non certifié" = échec
+  const reussis = participants.filter(p => p.statut === 'certifie').length;
+  const echecs = participants.filter(p => p.statut === 'non_certifie').length;
+  const autres = participants.length - reussis - echecs;
+  const taux = (reussis + echecs) ? Math.round(100 * reussis / (reussis + echecs)) : null;
+  const reussite = `
+    <table style="border-collapse:collapse;font-size:13px;">
+      <tr><td style="${cell}">Réussites (certifié)</td><td style="${cell}text-align:center;min-width:50px;">${reussis}</td></tr>
+      <tr><td style="${cell}">Échecs (non certifié)</td><td style="${cell}text-align:center;">${echecs}</td></tr>
+      <tr><td style="${cell}">Sans décision (inscrit / présent / absent)</td><td style="${cell}text-align:center;">${autres}</td></tr>
+      <tr><td style="${cell}"><strong>Taux de réussite</strong></td><td style="${cell}text-align:center;"><strong>${taux === null ? '—' : taux + ' %'}</strong></td></tr>
+    </table>
+    <p style="font-size:12px;color:#55636c;margin:6px 0 0;">Le résultat vient du statut de chaque stagiaire (menu « certifie » / « non_certifie » dans la liste ci-dessous).</p>`;
+
+  zone.innerHTML = `
+    <h3 style="margin-top:0;">Synthèse des évaluations</h3>
+    <h4 style="margin:8px 0;">Satisfaction des stagiaires</h4>
+    ${satisfaction}
+    ${commentaires.length ? `<h4 style="margin:14px 0 6px;">Commentaires des stagiaires</h4>
+      ${commentaires.map(p => `<div style="font-size:13px;padding:2px 0;"><strong>${esc(p.stagiaires?.prenom)} ${esc(p.stagiaires?.nom)}</strong> : ${esc(p.commentaire_evaluation)}</div>`).join('')}` : ''}
+    <h4 style="margin:14px 0 8px;">Réussite</h4>
+    ${reussite}`;
 }
 
 // ============================================================================

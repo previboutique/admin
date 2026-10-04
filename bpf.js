@@ -76,6 +76,7 @@ async function chargerEtAfficherBPF() {
   const [{ data: sessions, error }, { data: parametres }] = await Promise.all([
     supa.from('sessions_formation')
       .select('id, date_debut, date_fin, prix_unitaire, origine_financement, sous_traitance_recue, modalite, formateur_id, formations_catalogue(denomination, categorie, duree_heures), profils:formateur_id(nom, prenom, formateur_externe, taux_horaire)')
+      .neq('statut', 'annulee')   // sessions reportées/annulées : exclues (évite le double comptage)
       .gte('date_debut', debut)
       .lte('date_debut', fin),
     supa.from('bpf_parametres_exercice').select('*').eq('organisation_id', S.organisation.id).eq('annee_exercice', anneeExercice).maybeSingle(),

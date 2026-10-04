@@ -1,0 +1,148 @@
+<!--
+  © 2026 Admin Formation — Jérémy Bizeul — SARL Prévisecours.
+  Tous droits réservés. Toute reproduction, distribution ou réutilisation de ce code,
+  en tout ou partie, sans autorisation écrite préalable est interdite.
+  Auteur : Jérémy Bizeul — jeremy@bizeul.fr
+-->
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<meta name="author" content="Jérémy Bizeul (SARL Prévisecours)">
+<meta name="copyright" content="© 2026 Jérémy Bizeul / SARL Prévisecours. Tous droits réservés.">
+<title>Évaluation de la formation</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  :root { --primaire: #0a5c8a; --fond: #f4f6f8; --texte: #1c2b36; --bordure: #d7dee3; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif; background: var(--fond); color: var(--texte); }
+  header { background: var(--primaire); color: #fff; padding: 14px 16px; }
+  header h1 { font-size: 17px; margin: 0; }
+  header p { margin: 4px 0 0; font-size: 13px; opacity: .9; }
+  main { max-width: 560px; margin: 0 auto; padding: 16px 16px 60px; }
+  .carte { background: #fff; border: 1px solid var(--bordure); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
+  .question { font-size: 15px; margin: 0 0 10px; font-weight: 600; }
+  .notes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .notes button { border: 1px solid var(--bordure); background: #fff; border-radius: 8px; padding: 12px 0; font-size: 18px; font-weight: 600; cursor: pointer; color: var(--texte); }
+  .notes button.choisi { background: var(--primaire); color: #fff; border-color: var(--primaire); }
+  .legende { display: flex; justify-content: space-between; font-size: 11px; color: #55636c; margin-top: 4px; }
+  textarea, select { font: inherit; width: 100%; padding: 10px; border: 1px solid var(--bordure); border-radius: 8px; }
+  button.principal { width: 100%; background: var(--primaire); color: #fff; border: none; border-radius: 10px; padding: 14px; font-size: 16px; font-weight: 600; cursor: pointer; }
+  button.principal:disabled { opacity: .5; }
+  .erreur { color: #b3261e; font-size: 14px; margin-top: 10px; }
+  .info { font-size: 14px; color: #55636c; }
+  .grand { font-size: 17px; text-align: center; padding: 20px 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="titre">Évaluation de la formation</h1>
+  <p id="sous-titre"></p>
+</header>
+<main id="contenu"><p class="info">Chargement…</p></main>
+
+<script>
+// © 2026 Jérémy Bizeul / SARL Prévisecours — Tous droits réservés.
+// Page publique d'évaluation par QR code. Les critères doivent rester
+// identiques à QUESTIONS_SATISFACTION dans sessions.js.
+const SUPABASE_URL = 'https://kzahahrnauynnrfznkje.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_VpOYj7KajWRHJKyjPyLh_g_mgabFpgZ';
+const supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+const QUESTIONS = [
+  "Qualité de l'organisation",
+  "Clarté des objectifs",
+  "Qualité du formateur",
+  "Pertinence des méthodes pédagogiques du formateur",
+  "Le formateur donne l'envie d'apprendre",
+  "Qualité du matériel",
+  "La formation correspondait-elle à mes attentes",
+  "Etes-vous prêt à mettre en œuvre ces gestes et techniques",
+  "La durée de la formation m'a paru adaptée",
+  "Le rythme de la formation m'a paru adapté",
+];
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const token = new URLSearchParams(location.search).get('t');
+const reponses = {};
+let participantId = null;
+
+function dateFr(iso) { return iso ? new Date(iso + 'T12:00:00').toLocaleDateString('fr-FR') : ''; }
+function message(txt) { $('#contenu').innerHTML = `<div class="carte grand">${esc(txt)}</div>`; }
+
+async function demarrer() {
+  if (!token || !/^[0-9a-f-]{36}$/i.test(token)) { message('Lien invalide. Scannez à nouveau le QR code.'); return; }
+  const { data, error } = await supa.rpc('evaluation_charger', { p_token: token });
+  if (error || !data) { message('Impossible de charger l\'évaluation. Vérifiez votre connexion et réessayez.'); return; }
+  if (!data.ok) { message(data.message || 'Lien invalide.'); return; }
+  $('#titre').textContent = data.formation || 'Évaluation de la formation';
+  $('#sous-titre').textContent = (data.organisme || '') + ' — ' + dateFr(data.date_debut) + (data.date_fin !== data.date_debut ? ' au ' + dateFr(data.date_fin) : '');
+  if (!data.ouvert) { message(data.message || 'L\'évaluation n\'est pas ouverte.'); return; }
+
+  const dispo = (data.participants || []).filter(p => !p.deja_repondu);
+  if (!dispo.length) { message('Tous les stagiaires ont déjà répondu. Merci !'); return; }
+
+  $('#contenu').innerHTML = `
+    <div class="carte">
+      <p class="question">Qui êtes-vous ?</p>
+      <select id="qui">
+        <option value="">— Choisissez votre nom —</option>
+        ${dispo.map(p => `<option value="${esc(p.id)}">${esc(p.nom)}</option>`).join('')}
+      </select>
+      <p class="info" style="margin-bottom:0;">Votre nom n'apparaît pas ? Prévenez votre formateur.</p>
+    </div>
+    <div id="formulaire" style="display:none;"></div>`;
+  $('#qui').onchange = e => { participantId = e.target.value || null; $('#formulaire').style.display = participantId ? 'block' : 'none'; if (participantId) afficherFormulaire(); };
+}
+
+function afficherFormulaire() {
+  if ($('#formulaire').dataset.pret) return;
+  $('#formulaire').dataset.pret = '1';
+  $('#formulaire').innerHTML = `
+    <p class="info">Notez de 1 (insuffisant) à 4 (très satisfaisant).</p>
+    ${QUESTIONS.map((q, i) => `
+      <div class="carte">
+        <p class="question">${esc(q)}</p>
+        <div class="notes" data-i="${i}">
+          ${[1, 2, 3, 4].map(n => `<button type="button" data-n="${n}">${n}</button>`).join('')}
+        </div>
+        <div class="legende"><span>Insuffisant</span><span>Très satisfaisant</span></div>
+      </div>`).join('')}
+    <div class="carte">
+      <p class="question">Un commentaire ? (facultatif)</p>
+      <textarea id="commentaire" rows="4" maxlength="2000" placeholder="Vos remarques sur la formation…"></textarea>
+    </div>
+    <button class="principal" id="envoyer">Envoyer mon évaluation</button>
+    <div class="erreur" id="erreur"></div>`;
+
+  document.querySelectorAll('.notes button').forEach(b => {
+    b.onclick = () => {
+      const i = Number(b.parentElement.dataset.i);
+      reponses[QUESTIONS[i]] = Number(b.dataset.n);
+      b.parentElement.querySelectorAll('button').forEach(x => x.classList.toggle('choisi', x === b));
+    };
+  });
+  $('#envoyer').onclick = envoyer;
+}
+
+async function envoyer() {
+  $('#erreur').textContent = '';
+  const manquantes = QUESTIONS.filter(q => !reponses[q]);
+  if (manquantes.length) { $('#erreur').textContent = `Merci de répondre à toutes les questions (${manquantes.length} restante${manquantes.length > 1 ? 's' : ''}).`; return; }
+  $('#envoyer').disabled = true;
+  const { error } = await supa.rpc('evaluation_enregistrer', {
+    p_token: token, p_participant: participantId, p_reponses: reponses, p_commentaire: $('#commentaire').value.trim() || null,
+  });
+  if (error) { $('#erreur').textContent = error.message || 'Erreur lors de l\'envoi.'; $('#envoyer').disabled = false; return; }
+  message('Merci, votre évaluation a bien été enregistrée.');
+  $('#sous-titre').textContent = '';
+}
+
+demarrer();
+</script>
+<footer style="text-align:center;font-size:11px;color:#464645;opacity:.7;padding:0 16px 24px;">© 2026 Jérémy Bizeul / SARL Prévisecours</footer>
+</body>
+</html>

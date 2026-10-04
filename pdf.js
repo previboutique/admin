@@ -248,7 +248,8 @@ function genererAFF(session, participant, sansTelechargement) {
 
   // Tampon de l'organisme (la signature du représentant n'est pas reprise :
   // l'AFF est signée par le formateur).
-  if (y + 36 > doc.internal.pageSize.getHeight() - 15) { doc.addPage(); y = 20; }
+  // Tampon (20 mm max) + mention en bas : on ne saute de page qu'en dernier recours.
+  if (y + 30 > doc.internal.pageSize.getHeight() - 14) { doc.addPage(); y = 20; }
   ajouterSignatureEtTampon(doc, 195, y, true);
   y += 24;
 

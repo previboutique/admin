@@ -808,6 +808,7 @@ async function ouvrirSession(id) {
       <div id="selection-documents">Chargement…</div>
     </div>
 
+    <div class="carte" id="qr-eval-zone"></div>
     <div class="carte" id="synthese-zone"></div>
 
     <div class="carte">
@@ -827,6 +828,7 @@ async function ouvrirSession(id) {
     </div>`;
 
   rendreParticipants(session, participants || []);
+  rendreQrEvaluation(session);
   rendreSelectionDocuments(session, participants || []);
 
   if (PEUT_GERER_SESSIONS()) {
@@ -1218,6 +1220,81 @@ async function enregistrerEvaluation(participantId) {
 // ============================================================================
 // SYNTHÈSE DES ÉVALUATIONS DE LA SESSION (satisfaction + réussite)
 // ============================================================================
+
+// ----------------------------------------------------------------------------
+// Évaluation par QR code : le stagiaire scanne, choisit son nom et répond sur
+// son téléphone (page publique evaluation.html, protégée par un jeton propre à
+// la session, ouverte du dernier jour de la session à +7 jours).
+// ----------------------------------------------------------------------------
+function urlEvaluation(session) {
+  return new URL('evaluation.html', location.href).href.split('?')[0] + '?t=' + session.token_evaluation;
+}
+
+function qrDataUrl(texte, taille) {
+  const qr = qrcode(0, 'M');
+  qr.addData(texte);
+  qr.make();
+  // Dessiné sur un canvas pour obtenir un vrai PNG (la bibliothèque produit
+  // un GIF, mal accepté par jsPDF).
+  const n = qr.getModuleCount(), marge = 2, px = taille || 8;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = (n + 2 * marge) * px;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#000';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) ctx.fillRect((c + marge) * px, (r + marge) * px, px, px);
+  return canvas.toDataURL('image/png');
+}
+
+function rendreQrEvaluation(session) {
+  const zone = $('#qr-eval-zone');
+  if (!zone) return;
+  if (!session.token_evaluation || typeof qrcode !== 'function') {
+    zone.innerHTML = '<h3 style="margin-top:0;">Évaluation par QR code</h3><p style="color:#55636c;font-size:13px;">Indisponible : le patch SQL « évaluation par QR code » n\'a pas encore été exécuté dans Supabase.</p>';
+    return;
+  }
+  const url = urlEvaluation(session);
+  const fin = session.date_fin || session.date_debut;
+  const limite = new Date(fin + 'T12:00:00'); limite.setDate(limite.getDate() + 7);
+  zone.innerHTML = `
+    <h3 style="margin-top:0;">Évaluation par QR code</h3>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;">
+      <img src="${qrDataUrl(url, 5)}" alt="QR code d'évaluation" style="width:150px;height:150px;border:1px solid #d7dee3;border-radius:6px;">
+      <div style="flex:1;min-width:240px;font-size:13px;">
+        <p style="margin:0 0 8px;">Les stagiaires scannent ce QR code avec leur téléphone, choisissent leur nom et remplissent l'évaluation de satisfaction. Les réponses arrivent dans la synthèse ci-dessous.</p>
+        <p style="margin:0 0 8px;color:#55636c;">Ouvert du ${esc(formatDateFr(fin))} (dernier jour de la session) au ${esc(limite.toLocaleDateString('fr-FR'))}. Chaque stagiaire ne peut répondre qu'une fois.</p>
+        <button class="bouton" style="padding:6px 12px;font-size:13px;" onclick="telechargerAfficheQr('${session.id}')">Télécharger l'affiche (PDF)</button>
+        <button class="bouton" style="padding:6px 12px;font-size:13px;background:#eee;color:#333;margin-left:6px;" onclick="copierLienEvaluation()">Copier le lien</button>
+        <button class="bouton" style="padding:6px 12px;font-size:13px;background:#eee;color:#333;margin-left:6px;" onclick="window.open('${esc(url)}','_blank')">Tester</button>
+      </div>
+    </div>`;
+}
+
+async function copierLienEvaluation() {
+  const s = window.__sessionCourante;
+  try { await navigator.clipboard.writeText(urlEvaluation(s)); toast('Lien copié.'); }
+  catch (e) { prompt('Copie ce lien :', urlEvaluation(s)); }
+}
+
+function telechargerAfficheQr() {
+  const s = window.__sessionCourante;
+  const doc = new jsPDF();
+  if (typeof ajouterLogoEnTete === 'function') ajouterLogoEnTete(doc);
+  const f = s.formations_catalogue;
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(20); doc.setTextColor(10, 92, 138);
+  doc.text('Votre avis compte !', 105, 50, { align: 'center' });
+  doc.setFontSize(13); doc.setTextColor(20, 20, 20);
+  doc.text(doc.splitTextToSize(f?.denomination || '', 170), 105, 62, { align: 'center' });
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(11);
+  doc.text(plageDatesCourte(s), 105, 76, { align: 'center' });
+  doc.addImage(qrDataUrl(urlEvaluation(s), 10), 'PNG', 55, 90, 100, 100);
+  doc.setFontSize(13);
+  doc.text('Scannez ce QR code avec votre téléphone', 105, 205, { align: 'center' });
+  doc.text("pour évaluer la formation (2 minutes).", 105, 213, { align: 'center' });
+  doc.setFontSize(10); doc.setTextColor(90, 90, 90);
+  doc.text('Vos réponses servent à améliorer nos formations.', 105, 228, { align: 'center' });
+  telechargerOuOuvrir(doc, nomFichierDoc('Affiche evaluation QR', s, null));
+}
 
 // Radar SVG (échelle 0 à 4), sans bibliothèque externe.
 function radarSvg(libelles, valeurs) {

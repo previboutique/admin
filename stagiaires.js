@@ -174,6 +174,8 @@ async function ouvrirFicheStagiaire(id) {
         <option value="">—</option>
         ${(clients || []).map(c => `<option value="${c.id}" ${stagiaire?.client_id === c.id ? 'selected' : ''}>${esc(c.raison_sociale)}</option>`).join('')}
       </select>
+      ${stagiaire && PEUT_GERER_SESSIONS() ? `<div style="margin:6px 0 0;"><button type="button" class="bouton" id="stg-propager" style="background:#eee;color:#333;font-size:13px;">Reporter cette entreprise sur ses sessions et leurs autres stagiaires</button>
+        <div style="font-size:12px;color:#55636c;margin-top:3px;">Donne cette entreprise aux sessions de ce stagiaire qui n'en ont pas, et aux autres stagiaires présents dans ces sessions.</div></div>` : ''}
       <div style="display:flex;gap:10px;">
         <div style="flex:1;"><label for="stg-naissance">Date de naissance</label><input id="stg-naissance" type="date" value="${stagiaire?.date_naissance || ''}"></div>
         <div style="flex:1;"><label for="stg-lieu-naissance">Lieu de naissance</label><input id="stg-lieu-naissance" value="${stagiaire ? esc(stagiaire.lieu_naissance) : ''}"></div>
@@ -206,6 +208,17 @@ async function ouvrirFicheStagiaire(id) {
 
   if (stagiaire) chargerStatsStagiaire(stagiaire.id);
   if (PEUT_GERER_SESSIONS()) brancherNirStagiaire(stagiaire);
+
+  if ($('#stg-propager')) $('#stg-propager').onclick = async () => {
+    const cid = $('#stg-client').value;
+    if (!cid) { toast('Choisis d\'abord l\'entreprise du stagiaire.', 'erreur'); return; }
+    if (cid !== stagiaire.client_id) {
+      const { error } = await supa.from('stagiaires').update({ client_id: cid }).eq('id', stagiaire.id);
+      if (error) { DEBUG.erreur('stg-propager', error); toast('Erreur : ' + error.message, 'erreur'); return; }
+      stagiaire.client_id = cid;
+    }
+    await propagerDepuisStagiaire(stagiaire.id, cid);
+  };
 
   $('#stg-valider').onclick = async () => {
     const payload = {

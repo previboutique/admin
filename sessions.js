@@ -141,6 +141,9 @@ async function ecranSessions(vue) {
   window.__sessionsFormateursDisponibles = formateurs || [];
   filtrerEtAfficherSessions();
   rendreDoublonsSessions();
+  if (PEUT_GERER_SESSIONS() && typeof chargerSuiviEspaceClient === 'function') {
+    chargerSuiviEspaceClient().then(m => { window.__suiviEC = m; filtrerEtAfficherSessions(); });
+  }
 }
 
 function reinitialiserFiltresSessions() {
@@ -225,7 +228,7 @@ function filtrerEtAfficherSessions() {
 
   zone.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:14px;">
     <thead><tr style="text-align:left;color:#55636c;font-size:12px;">
-      ${enTete('numero_session')}${enTete('date_debut')}${enTete('formation')}${enTete('clients')}${enTete('stagiaires')}${enTete('statut')}
+      ${enTete('numero_session')}${enTete('date_debut')}${enTete('formation')}${enTete('clients')}${enTete('stagiaires')}${enTete('statut')}${PEUT_GERER_SESSIONS() ? '<th style="padding:6px 8px;">Espace client</th>' : ''}
     </tr></thead>
     <tbody>${data.map(s => `
       <tr style="border-top:1px solid #eee;cursor:pointer;${s.__nbStagiaires === 0 ? 'background:#fdf6e8;' : ''}" onclick="ouvrirSession('${s.id}')">
@@ -235,6 +238,7 @@ function filtrerEtAfficherSessions() {
         <td style="padding:6px 8px;">${esc((s.__nomsClients || []).join(', ') || '—')}</td>
         <td style="padding:6px 8px;text-align:right;${s.__nbStagiaires === 0 ? 'color:#b3261e;font-weight:600;' : ''}">${s.__nbStagiaires}</td>
         <td style="padding:6px 8px;">${esc(s.statut)}</td>
+        ${PEUT_GERER_SESSIONS() ? `<td style="padding:6px 8px;">${celluleEspaceClientSession(s.id)}</td>` : ''}
       </tr>`).join('')}
     </tbody></table>`;
 }
@@ -802,6 +806,8 @@ async function ouvrirSession(id) {
       <p style="font-size:12px;color:#55636c;margin:8px 0 0;">Chaque client a sa propre Convention (tarif et liste de stagiaires qui lui sont rattachés). La feuille d'émargement n'a pas de modèle papier de référence confirmé — mise en page à ajuster si besoin.</p>
     </div>
 
+    ${PEUT_GERER_SESSIONS() ? '<div class="carte" id="espace-client-session"></div>' : ''}
+
     <div class="carte">
       <h3 style="margin-top:0;">Téléchargement groupé et envoi au client</h3>
       <p style="font-size:12px;color:#55636c;margin:0 0 8px;">Sélectionne les documents à télécharger en une fois (ZIP) ou à envoyer par email au client.</p>
@@ -832,7 +838,9 @@ async function ouvrirSession(id) {
   rendreParticipants(session, participants || []);
   rendreQrEvaluation(session);
   rendreQrEmargement(session);
+  window.__emargementsSession = undefined;
   rendreSelectionDocuments(session, participants || []);
+  rendreSuiviEspaceClientSession(session);
   appliquerSectionsRepliables(session, sessionClients, participants || []);
 
   if (PEUT_GERER_SESSIONS()) {

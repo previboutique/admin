@@ -266,12 +266,20 @@ async function ouvrirFicheClient(id) {
       <div id="contact-form"></div>
     </div>
 
+    ${PEUT_GERER_SESSIONS() ? `
+    <div class="carte" style="max-width:640px;">
+      <h3 style="margin-top:0;">Accès à l'espace client</h3>
+      <div id="acces-client-zone">Chargement…</div>
+    </div>` : ''}
+
     <div class="carte" style="max-width:640px;">
       <h3 style="margin-top:0;">Statistiques AT / MP / jours ITT</h3>
       <div id="stats-liste">${rendreStats(stats)}</div>
       <button class="bouton" style="margin-top:10px;padding:6px 12px;font-size:13px;" onclick="ouvrirFormStat('${client.id}', null)">+ Ajouter une année</button>
       <div id="stat-form"></div>
     </div>` : ''}`;
+
+  if (client && PEUT_GERER_SESSIONS() && typeof rendreAccesClient === 'function') rendreAccesClient(client, contacts);
 
   const majZoneOpco = () => {
     const zone = $('#ci-opco-zone');

@@ -10,21 +10,36 @@
 // chaque stagiaire inscrit, ses documents individuels (Convocation, AFF,
 // Certificat de réalisation).
 function documentsDisponibles(session, participants) {
-  const liste = [
-    { cle: 'convention', libelle: 'Convention de formation', type: 'convention', participant: null,
-      genere: (sans) => genererConvention(session, participants, sans) },
-    { cle: 'feuille_presence', libelle: "Feuille d'émargement", type: 'feuille_presence', participant: null,
-      genere: (sans) => genererFeuillePresence(session, participants, sans) },
-  ];
+  const clientsSession = window.__sessionClients || [];
+  const liste = [];
+  if (clientsSession.length) {
+    // Une convention et une feuille d'émargement PAR client (chaque client ne voit que les siens).
+    clientsSession.forEach(sc => {
+      const nom = sc.clients?.raison_sociale || '';
+      liste.push(
+        { cle: `convention:${sc.client_id}`, libelle: `Convention — ${nom}`, type: 'convention', participant: null, client_id: sc.client_id,
+          genere: (sans) => genererConvention(session, participants, sans, sc) },
+        { cle: `feuille_presence:${sc.client_id}`, libelle: `Feuille d'émargement — ${nom}`, type: 'feuille_presence', participant: null, client_id: sc.client_id,
+          genere: (sans) => genererFeuillePresence(session, participants, sans, { clientEntry: sc, emargements: window.__emargementsSession }) },
+      );
+    });
+  } else {
+    liste.push(
+      { cle: 'convention', libelle: 'Convention de formation', type: 'convention', participant: null,
+        genere: (sans) => genererConvention(session, participants, sans) },
+      { cle: 'feuille_presence', libelle: "Feuille d'émargement", type: 'feuille_presence', participant: null,
+        genere: (sans) => genererFeuillePresence(session, participants, sans) },
+    );
+  }
 
   (participants || []).forEach(p => {
     const nomStagiaire = `${p.stagiaires?.prenom || ''} ${p.stagiaires?.nom || ''}`.trim();
     liste.push(
-      { cle: `convocation:${p.id}`, libelle: `Convocation — ${nomStagiaire}`, type: 'convocation', participant: p,
+      { cle: `convocation:${p.id}`, libelle: `Convocation — ${nomStagiaire}`, type: 'convocation', participant: p, client_id: p.client_id || session.client_id,
         genere: (sans) => genererConvocation(session, p, sans) },
-      { cle: `aff:${p.id}`, libelle: `AFF — ${nomStagiaire}`, type: 'attestation_fin_formation', participant: p,
+      { cle: `aff:${p.id}`, libelle: `AFF — ${nomStagiaire}`, type: 'attestation_fin_formation', participant: p, client_id: p.client_id || session.client_id,
         genere: (sans) => genererAFF(session, p, sans) },
-      { cle: `certificat:${p.id}`, libelle: `Certificat de réalisation — ${nomStagiaire}`, type: 'certificat_realisation', participant: p,
+      { cle: `certificat:${p.id}`, libelle: `Certificat de réalisation — ${nomStagiaire}`, type: 'certificat_realisation', participant: p, client_id: p.client_id || session.client_id,
         genere: (sans) => genererCertificatRealisation(session, p, sans) },
     );
   });
@@ -71,6 +86,7 @@ function rendreSelectionDocuments(session, participants) {
       <span style="flex:1;"></span>
       <button class="bouton" style="font-size:13px;" onclick="telechargerSelectionZip()">Télécharger la sélection (ZIP)</button>
       ${PEUT_GERER_SESSIONS() ? '<button class="bouton" style="font-size:13px;" onclick="ouvrirPanneauEnvoi()">Envoyer au client</button>' : ''}
+      ${PEUT_GERER_SESSIONS() ? '<button class="bouton" style="font-size:13px;background:#1a7f3c;" title="Le client les retrouve dans son espace client (connexion email + mot de passe)" onclick="publierSelectionEspaceClient()">Publier dans l\'espace client</button>' : ''}
     </div>
     <div id="envoi-zone" style="margin-top:12px;"></div>`;
 }
@@ -199,7 +215,7 @@ async function envoyerDocumentsClient(selection) {
         organisation_id: S.organisation.id,
         session_id: session.id,
         stagiaire_id: desc.participant ? desc.participant.stagiaire_id : null,
-        client_id: session.client_id,
+        client_id: desc.client_id || session.client_id,
         type: desc.type,
         storage_path: chemin,
         genere_par: S.profil.id,

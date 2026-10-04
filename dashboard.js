@@ -21,6 +21,10 @@ async function ecranAccueil(vue) {
       <h3 style="margin-top:0;">Sessions à venir</h3>
       <div id="db-agenda">Chargement…</div>
     </div>
+    ${PEUT_GERER_SESSIONS() ? `<div class="carte">
+      <h3 style="margin-top:0;">Espace client — à relancer <span style="font-weight:400;font-size:13px;color:#55636c;">(informations Passeport de prévention manquantes, conventions à signer)</span></h3>
+      <div id="db-espace-client">Chargement…</div>
+    </div>` : ''}
     <div class="carte">
       <h3 style="margin-top:0;">Recyclages à programmer <span style="font-weight:400;font-size:13px;color:#55636c;">(échéance dans les ${HORIZON_RELANCE_JOURS} jours, ou dépassée)</span></h3>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
@@ -36,6 +40,7 @@ async function ecranAccueil(vue) {
     </div>`;
 
   chargerAgenda();
+  if (PEUT_GERER_SESSIONS() && typeof chargerSuiviEspaceClientAccueil === 'function') chargerSuiviEspaceClientAccueil();
   chargerRecyclages();
 }
 

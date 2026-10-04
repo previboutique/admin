@@ -45,7 +45,7 @@ function rendreSelectionDocuments(session, participants) {
 
   const ligne = (d) => `
     <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:normal;margin:4px 0;">
-      <input type="checkbox" class="doc-checkbox" value="${d.cle}" style="width:auto;">
+      <input type="checkbox" class="doc-checkbox" value="${d.cle}" data-type="${d.type}" style="width:auto;">
       ${esc(d.libelle)}
     </label>`;
 
@@ -56,6 +56,13 @@ function rendreSelectionDocuments(session, participants) {
     </div>
     <div style="margin-bottom:10px;">
       <strong style="font-size:13px;color:#55636c;">Documents par stagiaire</strong>
+      ${individuels.length ? `
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0;">
+        <span style="font-size:12px;color:#55636c;">Tous les stagiaires :</span>
+        <button class="bouton" style="background:#eaf3f9;color:#0a5c8a;font-size:12px;padding:5px 10px;" onclick="basculerTypeDocuments('convocation')">Convocations</button>
+        <button class="bouton" style="background:#eaf3f9;color:#0a5c8a;font-size:12px;padding:5px 10px;" onclick="basculerTypeDocuments('attestation_fin_formation')">AFF</button>
+        <button class="bouton" style="background:#eaf3f9;color:#0a5c8a;font-size:12px;padding:5px 10px;" onclick="basculerTypeDocuments('certificat_realisation')">Certificats</button>
+      </div>` : ''}
       ${individuels.length ? individuels.map(ligne).join('') : '<p style="font-size:13px;color:#55636c;">Aucun stagiaire inscrit.</p>'}
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-top:1px solid #eee;padding-top:10px;">
@@ -66,6 +73,14 @@ function rendreSelectionDocuments(session, participants) {
       ${PEUT_GERER_SESSIONS() ? '<button class="bouton" style="font-size:13px;" onclick="ouvrirPanneauEnvoi()">Envoyer au client</button>' : ''}
     </div>
     <div id="envoi-zone" style="margin-top:12px;"></div>`;
+}
+
+// Coche (ou décoche si tout est déjà coché) un type de document pour tous
+// les stagiaires : convocation, attestation_fin_formation, certificat_realisation.
+function basculerTypeDocuments(type) {
+  const cases = Array.from(document.querySelectorAll('.doc-checkbox')).filter(c => c.dataset.type === type);
+  const toutCoche = cases.length > 0 && cases.every(c => c.checked);
+  cases.forEach(c => { c.checked = !toutCoche; });
 }
 
 function toutCocherDocuments(coche) {

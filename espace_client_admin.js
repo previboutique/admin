@@ -31,8 +31,13 @@ async function chargerSuiviEspaceClient() {
     supa.rpc('nir_renseignes'),
     supa.from('acces_clients').select('client_id, actif, derniere_connexion'),
   ]);
-  const err = e1 || e2 || e3 || e4 || e5;
-  if (err) { DEBUG.erreur('chargerSuiviEspaceClient', err); return null; }
+  const erreurs = [['participants', e1], ['documents publiés', e2], ['signatures', e3], ['NIR renseignés (fonction nir_renseignes)', e4], ['accès clients', e5]].filter(x => x[1]);
+  if (erreurs.length) {
+    DEBUG.erreur('chargerSuiviEspaceClient', erreurs.map(x => x[0] + ' : ' + x[1].message));
+    window.__erreurEC = erreurs.map(x => x[0] + ' → ' + (x[1].message || x[1].code || 'erreur')).join(' | ');
+    return null;
+  }
+  window.__erreurEC = null;
 
   const nir = new Set(nirIds || []);
   const publiees = new Set((docs || []).map(d => `${d.session_id}|${d.client_id}`));
@@ -108,7 +113,7 @@ async function rendreSuiviEspaceClientSession(session) {
   if (!zone || !PEUT_GERER_SESSIONS()) return;
   zone.innerHTML = '<h3 style="margin-top:0;">Espace client</h3><p style="color:#55636c;font-size:13px;">Chargement…</p>';
   const suivi = await chargerSuiviEspaceClient();
-  if (!suivi) { zone.innerHTML = '<h3 style="margin-top:0;">Espace client</h3><p class="erreur">Erreur de chargement (le patch du 05/10/2026 « espace client » est-il appliqué ?).</p>'; return; }
+  if (!suivi) { zone.innerHTML = '<h3 style="margin-top:0;">Espace client</h3><p class="erreur">Erreur de chargement : ' + esc(window.__erreurEC || 'inconnue') + '<br><span style="font-size:12px;">(le patch « espace client » du 05/10/2026 est-il appliqué ?)</span></p>'; return; }
   const s = suivi.sessions.get(session.id);
   if (!s) { zone.innerHTML = '<h3 style="margin-top:0;">Espace client</h3><p style="color:#55636c;font-size:13px;">Aucun stagiaire inscrit : rien à suivre pour le moment.</p>'; return; }
 
@@ -142,7 +147,7 @@ async function chargerSuiviEspaceClientAccueil() {
   const zone = $('#db-espace-client');
   if (!zone) return;
   const suivi = await chargerSuiviEspaceClient();
-  if (!suivi) { zone.innerHTML = '<p class="erreur">Erreur de chargement (patch « espace client » appliqué ?).</p>'; return; }
+  if (!suivi) { zone.innerHTML = '<p class="erreur">Erreur de chargement : ' + esc(window.__erreurEC || 'inconnue') + '<br><span style="font-size:12px;">(patch « espace client » appliqué ?)</span></p>'; return; }
 
   // Regroupe par client : stagiaires à compléter + conventions non signées.
   const parClient = new Map();
@@ -187,7 +192,7 @@ async function rendreAccesClient(client, contacts) {
   const zone = $('#acces-client-zone');
   if (!zone) return;
   const { data, error } = await supa.from('acces_clients').select('*').eq('client_id', client.id).order('created_at');
-  if (error) { DEBUG.erreur('rendreAccesClient', error); zone.innerHTML = '<p class="erreur">Erreur de chargement (patch « espace client » appliqué ?).</p>'; return; }
+  if (error) { DEBUG.erreur('rendreAccesClient', error); zone.innerHTML = '<p class="erreur">Erreur de chargement : ' + esc(error.message) + '</p>'; return; }
   const liste = (data || []).map(a => `
     <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;padding:6px 0;border-top:1px solid #eee;font-size:13px;${a.actif ? '' : 'opacity:.55;'}">
       <span><strong>${esc(a.prenom || '')} ${esc(a.nom || '')}</strong>${a.fonction ? ' — ' + esc(a.fonction) : ''}<br>

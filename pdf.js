@@ -481,7 +481,17 @@ function formatDateCourte(d) {
 // Au-delà de 3 jours, la page bascule automatiquement en paysage pour que
 // les colonnes journalières restent lisibles.
 // ============================================================================
-function genererFeuillePresence(session, participants, sansTelechargement) {
+//
+// Version SIGNÉE (émargement électronique par QR code) : opts.emargements =
+// lignes de la table `emargements` de la session ; opts.clientEntry = ligne de
+// session_clients pour ne produire que la feuille d'UN client (confidentialité :
+// un OPCO ne voit que les stagiaires de son client). Les signatures
+// manuscrites sont dessinées dans les cases, avec leur horodatage, et la
+// signature du formateur est ajoutée sur une ligne dédiée.
+function genererFeuillePresence(session, participants, sansTelechargement, opts) {
+  opts = opts || {};
+  const signe = Array.isArray(opts.emargements);
+  if (opts.clientEntry) participants = (participants || []).filter(p => p.client_id === opts.clientEntry.client_id);
   const jours = joursDeLaSession(session);
   const paysage = jours.length > 3;
   const doc = new jsPDF({ compress: true, ...(paysage ? { orientation: 'landscape' } : {}) });
@@ -492,7 +502,9 @@ function genererFeuillePresence(session, participants, sansTelechargement) {
 
   // Chaque stagiaire affiche sa propre entreprise (une session peut réunir
   // plusieurs clients) ; l'en-tête liste les entreprises distinctes.
-  const nomsClients = Array.from(new Set((participants || []).map(p => p.clients?.raison_sociale).filter(Boolean)));
+  const nomsClients = opts.clientEntry
+    ? [opts.clientEntry.clients?.raison_sociale].filter(Boolean)
+    : Array.from(new Set((participants || []).map(p => p.clients?.raison_sociale).filter(Boolean)));
   const adresse = [session.lieu, session.adresse, [session.code_postal, session.ville].filter(Boolean).join(' ')].filter(Boolean).join(', ');
   const horaires = (session.horaires && session.horaires[0]) || {};
   const formateurNom = session.__formateurNom || S.organisation.representant_nom || `${S.profil.prenom} ${S.profil.nom}`;
@@ -521,7 +533,7 @@ function genererFeuillePresence(session, participants, sansTelechargement) {
   // Complète avec des lignes vierges (jusqu'à un minimum de 15) pour que la
   // feuille reste utilisable à l'impression même si tous les stagiaires
   // n'ont pas encore été saisis dans l'appli au moment de l'impression.
-  const MINIMUM_LIGNES = 15;
+  const MINIMUM_LIGNES = signe ? 0 : 15;
   const dateEtLieuNaissance = st => st?.date_naissance ? formatDateLongue(st.date_naissance) : '';
   const lignesStagiaires = (participants || []).map(p => [
     `${p.stagiaires?.nom || ''} ${p.stagiaires?.prenom || ''}`.trim(),
@@ -530,6 +542,23 @@ function genererFeuillePresence(session, participants, sansTelechargement) {
   ]);
   const ligneVierge = () => ['', '', ...jours.flatMap(() => ['', ''])];
   const lignesVierges = Array.from({ length: Math.max(0, MINIMUM_LIGNES - lignesStagiaires.length) }, ligneVierge);
+
+  // Signatures électroniques : clé "idParticipant|AAAA-MM-JJ|creneau" (stagiaires)
+  // et "formateur|AAAA-MM-JJ|creneau".
+  const isoLocal = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const signatures = {};
+  if (signe) {
+    opts.emargements.forEach(e => { signatures[`${e.participant_id || 'formateur'}|${e.jour}|${e.demi_journee}`] = e; });
+    lignesStagiaires.push([`Formateur : ${formateurNom}`, '', ...jours.flatMap(() => ['', ''])]);
+  }
+  const nbStagiaires = (participants || []).length;
+  const signatureDe = (indexLigne, indexColonne) => {
+    if (!signe || indexColonne < 2 || indexLigne > nbStagiaires) return null;
+    const jour = jours[Math.floor((indexColonne - 2) / 2)];
+    const creneau = (indexColonne - 2) % 2 === 0 ? 'matin' : 'apres_midi';
+    const id = indexLigne === nbStagiaires ? 'formateur' : participants[indexLigne].id;
+    return signatures[`${id}|${isoLocal(jour)}|${creneau}`] || null;
+  };
 
   doc.autoTable({
     startY: y,
@@ -542,20 +571,39 @@ function genererFeuillePresence(session, participants, sansTelechargement) {
       jours.flatMap(() => ['Matin', 'Après-m.']),
     ],
     body: [...lignesStagiaires, ...lignesVierges],
-    styles: { fontSize: 8.5, cellPadding: 2, minCellHeight: 9 },
+    theme: signe ? 'grid' : 'striped',
+    styles: { fontSize: 8.5, cellPadding: 2, minCellHeight: signe ? 14 : 9 },
     headStyles: { fillColor: [10, 92, 138], fontSize: 8.5 },
     columnStyles: { 0: { cellWidth: 38 }, 1: { cellWidth: 30 } },
+    didDrawCell: signe ? (data) => {
+      if (data.section !== 'body') return;
+      const e = signatureDe(data.row.index, data.column.index);
+      if (!e) return;
+      try {
+        const largeurMax = data.cell.width - 2, hauteurMax = data.cell.height - 5;
+        const largeur = Math.min(largeurMax, hauteurMax * 2.5), hauteur = largeur / 2.5;
+        doc.addImage(e.signature, 'PNG', data.cell.x + (data.cell.width - largeur) / 2, data.cell.y + 0.8, largeur, hauteur);
+        const heure = new Date(e.signe_le).toLocaleString('fr-FR', { timeZone: 'Europe/Paris', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(5.5); doc.setTextColor(110, 110, 110);
+        doc.text(heure, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height - 0.9, { align: 'center' });
+      } catch (err) { /* signature illisible — case laissée vide */ }
+    } : undefined,
   });
   y = doc.lastAutoTable.finalY + 4;
 
-  doc.autoTable({
-    startY: y,
-    body: [[`Formateur : ${formateurNom}`, '']],
-    styles: { fontSize: 10, cellPadding: 3, minCellHeight: 14 },
-    columnStyles: { 0: { cellWidth: 68 }, 1: { cellWidth: (largeurPage - MARGE * 2) - 68 } },
-  });
+  if (signe) {
+    doc.setFont('helvetica', 'italic'); doc.setFontSize(8); doc.setTextColor(90, 90, 90);
+    doc.text("Émargement électronique : signatures manuscrites recueillies sur téléphone par QR code, horodatées (heure de Paris).", MARGE, y + 2);
+  } else {
+    doc.autoTable({
+      startY: y,
+      body: [[`Formateur : ${formateurNom}`, '']],
+      styles: { fontSize: 10, cellPadding: 3, minCellHeight: 14 },
+      columnStyles: { 0: { cellWidth: 68 }, 1: { cellWidth: (largeurPage - MARGE * 2) - 68 } },
+    });
+  }
 
-  return telechargerOuOuvrir(doc, nomFichierDoc('Feuille de presence', session, null), sansTelechargement);
+  return telechargerOuOuvrir(doc, nomFichierDoc(signe ? 'Feuille emargement signee' : 'Feuille de presence', session, null, opts.clientEntry?.clients?.raison_sociale), sansTelechargement);
 }
 
 // ============================================================================

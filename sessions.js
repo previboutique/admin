@@ -808,6 +808,7 @@ async function ouvrirSession(id) {
       <div id="selection-documents">Chargement…</div>
     </div>
 
+    <div class="carte" id="qr-emarg-zone"></div>
     <div class="carte" id="qr-eval-zone"></div>
     <div class="carte" id="synthese-zone"></div>
 
@@ -829,6 +830,7 @@ async function ouvrirSession(id) {
 
   rendreParticipants(session, participants || []);
   rendreQrEvaluation(session);
+  rendreQrEmargement(session);
   rendreSelectionDocuments(session, participants || []);
 
   if (PEUT_GERER_SESSIONS()) {
@@ -1226,6 +1228,78 @@ async function enregistrerEvaluation(participantId) {
 // son téléphone (page publique evaluation.html, protégée par un jeton propre à
 // la session, ouverte du dernier jour de la session à +7 jours).
 // ----------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
+// Émargement par QR code : un seul QR par session (quel que soit le nombre de
+// clients). Le stagiaire signe au doigt par demi-journée sur emargement.html ;
+// le formateur (connecté) signe depuis la même page. À la fin, on sort une
+// feuille d'émargement signée PAR CLIENT (confidentialité vis-à-vis des OPCO).
+// ----------------------------------------------------------------------------
+function urlEmargement(session) {
+  return new URL('emargement.html', location.href).href.split('?')[0] + '?t=' + session.token_emargement;
+}
+
+async function rendreQrEmargement(session) {
+  const zone = $('#qr-emarg-zone');
+  if (!zone) return;
+  if (!session.token_emargement || typeof qrcode !== 'function') {
+    zone.innerHTML = '<h3 style="margin-top:0;">Émargement par QR code</h3><p style="color:#55636c;font-size:13px;">Indisponible : le patch SQL « émargement par QR code » n\'a pas encore été exécuté dans Supabase.</p>';
+    return;
+  }
+  const url = urlEmargement(session);
+  const clients = window.__sessionClients || [];
+  const boutonsClients = clients.length
+    ? clients.map(c => `<button class="bouton" style="padding:6px 12px;font-size:13px;margin:0 6px 6px 0;" onclick="genererFeuilleEmargementSignee('${c.client_id}')">Feuille signée — ${esc(c.clients?.raison_sociale || 'client')}</button>`).join('') +
+      (clients.length > 1 ? `<button class="bouton" style="padding:6px 12px;font-size:13px;margin:0 6px 6px 0;background:#eee;color:#333;" onclick="genererFeuilleEmargementSignee(null)">Feuille complète (usage interne)</button>` : '')
+    : `<button class="bouton" style="padding:6px 12px;font-size:13px;" onclick="genererFeuilleEmargementSignee(null)">Feuille signée (PDF)</button>`;
+  zone.innerHTML = `
+    <h3 style="margin-top:0;">Émargement par QR code</h3>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;">
+      <img src="${qrDataUrl(url, 5)}" alt="QR code d'émargement" style="width:150px;height:150px;border:1px solid #d7dee3;border-radius:6px;">
+      <div style="flex:1;min-width:260px;font-size:13px;">
+        <p style="margin:0 0 8px;">Un seul QR code pour toute la session. Chaque stagiaire scanne, choisit son nom et signe au doigt, matin et après-midi. Le formateur, connecté à l'application, ouvre la même page et choisit « Je suis le formateur ».</p>
+        <p style="margin:0 0 8px;color:#55636c;">Ouvert du ${esc(formatDateFr(session.date_debut))} au ${esc(formatDateFr(session.date_fin || session.date_debut))}. Signatures horodatées, impossibles à modifier.</p>
+        <p id="emarg-compteur" style="margin:0 0 10px;font-weight:600;">Signatures reçues : …</p>
+        <button class="bouton" style="padding:6px 12px;font-size:13px;" onclick="telechargerAfficheEmargement()">Affiche du QR code (PDF)</button>
+        <button class="bouton" style="padding:6px 12px;font-size:13px;background:#eee;color:#333;margin-left:6px;" onclick="navigator.clipboard.writeText('${esc(url)}').then(()=>toast('Lien copié.'))">Copier le lien</button>
+        <button class="bouton" style="padding:6px 12px;font-size:13px;background:#eee;color:#333;margin-left:6px;" onclick="window.open('${esc(url)}','_blank')">Émarger (formateur) / tester</button>
+        <div style="margin-top:14px;border-top:1px solid #eee;padding-top:10px;">
+          <strong style="font-size:13px;color:#55636c;">Feuilles d'émargement signées — une par client</strong>
+          <p style="font-size:12px;color:#55636c;margin:4px 0 8px;">Chaque feuille ne contient que les stagiaires du client concerné : à envoyer à l'OPCO sans divulguer les autres entreprises.</p>
+          ${boutonsClients}
+        </div>
+      </div>
+    </div>`;
+
+  const { data } = await supa.from('emargements').select('role').eq('session_id', session.id);
+  const c = $('#emarg-compteur');
+  if (c) c.textContent = `Signatures reçues : ${(data || []).filter(e => e.role === 'stagiaire').length} stagiaire(s), ${(data || []).filter(e => e.role === 'formateur').length} formateur`;
+}
+
+async function genererFeuilleEmargementSignee(clientId) {
+  const session = window.__sessionCourante;
+  const { data, error } = await supa.from('emargements').select('*').eq('session_id', session.id);
+  if (error) { DEBUG.erreur('genererFeuilleEmargementSignee', error); toast('Erreur : ' + error.message, 'erreur'); return; }
+  const clientEntry = clientId ? (window.__sessionClients || []).find(c => c.client_id === clientId) : null;
+  genererFeuillePresence(session, window.__participantsCourants, false, { emargements: data || [], clientEntry });
+}
+
+function telechargerAfficheEmargement() {
+  const s = window.__sessionCourante;
+  const doc = new jsPDF({ compress: true });
+  if (typeof ajouterLogoEnTete === 'function') ajouterLogoEnTete(doc);
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(20); doc.setTextColor(10, 92, 138);
+  doc.text('Émargement', 105, 50, { align: 'center' });
+  doc.setFontSize(13); doc.setTextColor(20, 20, 20);
+  doc.text(doc.splitTextToSize(s.formations_catalogue?.denomination || '', 170), 105, 62, { align: 'center' });
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(11);
+  doc.text(plageDatesCourte(s), 105, 76, { align: 'center' });
+  doc.addImage(qrDataUrl(urlEmargement(s), 10), 'PNG', 55, 90, 100, 100);
+  doc.setFontSize(13);
+  doc.text('Scannez ce QR code avec votre téléphone,', 105, 205, { align: 'center' });
+  doc.text('choisissez votre nom et signez, matin et après-midi.', 105, 213, { align: 'center' });
+  telechargerOuOuvrir(doc, nomFichierDoc('Affiche emargement QR', s, null));
+}
+
 function urlEvaluation(session) {
   return new URL('evaluation.html', location.href).href.split('?')[0] + '?t=' + session.token_evaluation;
 }

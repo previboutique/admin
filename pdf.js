@@ -182,7 +182,9 @@ function genererConvocation(session, participant, sansTelechargement) {
   T(53, yDate + 3.8, 12, false, multi ? 'Elle se déroulera' : 'Elle se déroulera le');
   T(multi ? 150 : 190, yDate, 16, true, multi ? formatPlageDatesLongue(session.date_debut, session.date_fin) : formatDateLongue(session.date_debut));
   T(53, yDate + 37.8, 12, false, 'Selon les horaires suivant :');
-  const h = (session.horaires && session.horaires[0]) || {};
+  const h0 = (session.horaires && session.horaires[0]) || {};
+  const fh = v => { const m = /^(\d{1,2}):(\d{2})/.exec(v || ''); return m ? `${m[1].padStart(2, '0')}h${m[2]}` : (v || null); };
+  const h = { debut: fh(h0.debut), pause_debut: fh(h0.pause_debut), pause_fin: fh(h0.pause_fin), fin: fh(h0.fin) };
   const yH = yDate + 68.8;
   T(53, yH, 12, false, 'Heure de début :');      T(148, yH - 0.9, 14, true, h.debut || 'à préciser');
   T(53, yH + 26, 12, false, 'Pause déjeuner :');  T(148, yH + 23.1, 14, true, h.pause_debut || '—');

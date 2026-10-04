@@ -739,6 +739,7 @@ async function ouvrirSession(id) {
           — ${esc(nomsClients.join(', ') || 'sans client')}
           — statut : ${esc(session.statut)}
         </p>
+        <div id="sess-horaires" style="margin-top:8px;font-size:13px;color:#55636c;">${htmlHorairesSession(session, false)}</div>
         ${PEUT_GERER_SESSIONS() && /secour/i.test(session.formations_catalogue?.categorie || '') ? `
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px;font-size:13px;color:#55636c;">
           <span>ForePrev — n° de session :</span>
@@ -951,6 +952,38 @@ async function ajouterClientSessionExistante(sessionId) {
   }
   toast('Client ajouté à la session.');
   ouvrirSession(sessionId);
+}
+
+// Horaires de la session (convocation) : affichés en lecture seule, avec un bouton « Modifier » (admin / gestionnaire).
+function htmlHorairesSession(session, edition) {
+  const h = (session.horaires && session.horaires[0]) || {};
+  const fh = v => { const m = /^(\d{1,2}):(\d{2})/.exec(v || ''); return m ? `${m[1].padStart(2, '0')}h${m[2]}` : ''; };
+  const t = v => esc(String(v || '').slice(0, 5));
+  if (edition) return `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;">
+      <span>Horaires — début :</span><input type="time" id="sess-h-debut" value="${t(h.debut)}" style="width:105px;margin:0;padding:4px 8px;">
+      <span>pause de :</span><input type="time" id="sess-h-pause-debut" value="${t(h.pause_debut)}" style="width:105px;margin:0;padding:4px 8px;">
+      <span>à :</span><input type="time" id="sess-h-pause-fin" value="${t(h.pause_fin)}" style="width:105px;margin:0;padding:4px 8px;">
+      <span>fin :</span><input type="time" id="sess-h-fin" value="${t(h.fin)}" style="width:105px;margin:0;padding:4px 8px;">
+      <button class="bouton" style="padding:4px 12px;font-size:13px;margin:0;" onclick="enregistrerHorairesSession('${session.id}')">Enregistrer</button>
+      <button class="bouton" style="padding:4px 12px;font-size:13px;margin:0;background:#eee;color:#333;" onclick="annulerHorairesSession()">Annuler</button>
+    </div>`;
+  const aucun = !(h.debut || h.pause_debut || h.pause_fin || h.fin);
+  const texte = aucun ? '<em>non renseignés</em>'
+    : `${fh(h.debut) || '—'} → ${fh(h.fin) || '—'}${(h.pause_debut || h.pause_fin) ? ` (pause déjeuner ${fh(h.pause_debut) || '—'} – ${fh(h.pause_fin) || '—'})` : ''}`;
+  return `<span>Horaires de la session : <strong style="color:#1c2b36;">${texte}</strong></span>
+    ${PEUT_GERER_SESSIONS() ? `<button class="bouton" style="padding:3px 10px;font-size:12px;margin:0 0 0 8px;" onclick="modifierHorairesSession()">${aucun ? 'Renseigner' : 'Modifier'}</button>` : ''}`;
+}
+function modifierHorairesSession() { $('#sess-horaires').innerHTML = htmlHorairesSession(window.__sessionCourante, true); }
+function annulerHorairesSession() { $('#sess-horaires').innerHTML = htmlHorairesSession(window.__sessionCourante, false); }
+
+async function enregistrerHorairesSession(sessionId) {
+  const h = { debut: $('#sess-h-debut').value || null, pause_debut: $('#sess-h-pause-debut').value || null, pause_fin: $('#sess-h-pause-fin').value || null, fin: $('#sess-h-fin').value || null };
+  const horaires = (h.debut || h.pause_debut || h.pause_fin || h.fin) ? [h] : [];
+  const { error } = await supa.from('sessions_formation').update({ horaires }).eq('id', sessionId);
+  if (error) { DEBUG.erreur('enregistrerHorairesSession', error); toast('Erreur : ' + error.message, 'erreur'); return; }
+  toast('Horaires enregistrés.');
+  window.__sessionCourante.horaires = horaires;
+  annulerHorairesSession();
 }
 
 async function enregistrerForprevSession(sessionId) {

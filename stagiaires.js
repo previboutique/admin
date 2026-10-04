@@ -32,6 +32,12 @@ async function ecranStagiaires(vue) {
   if (error) { DEBUG.erreur('ecranStagiaires', error); $('#stagiaires-liste').textContent = 'Erreur de chargement.'; return; }
 
   window.__stagiairesTous = (data || []).map(s => ({ ...s, __nbSessions: s.session_participants?.[0]?.count || 0 }));
+  // NIR renseignés (sans jamais lire les NIR eux-mêmes) — réservé admin/gestionnaire.
+  window.__nirRenseignes = new Set();
+  if (PEUT_GERER_SESSIONS()) {
+    const { data: ids, error: errNir } = await supa.rpc('nir_renseignes');
+    if (errNir) DEBUG.erreur('nir_renseignes', errNir); else window.__nirRenseignes = new Set(ids || []);
+  }
   rendreListeStagiaires(window.__stagiairesTous);
   if (PEUT_GERER_SESSIONS()) rendreDoublonsStagiaires();
 
@@ -53,6 +59,7 @@ function rendreListeStagiaires(liste) {
         <td style="padding:6px 8px;color:#55636c;">${esc(s.clients?.raison_sociale || '')}</td>
         <td style="padding:6px 8px;color:#55636c;">${esc(s.email || '')}</td>
         <td style="padding:6px 8px;color:#55636c;">${esc(s.telephone || '')}</td>
+        ${PEUT_GERER_SESSIONS() ? `<td style="padding:6px 8px;font-size:12px;white-space:nowrap;" title="${(window.__nirRenseignes || new Set()).has(s.id) ? 'NIR renseigné' : 'NIR manquant (nécessaire pour l\'export Passeport de prévention)'}">${(window.__nirRenseignes || new Set()).has(s.id) ? '<span style="color:#1a7f3c;">NIR ✔</span>' : '<span style="color:#8a5a00;">NIR —</span>'}</td>` : ''}
         <td style="padding:6px 8px;color:#55636c;text-align:right;">${s.__nbSessions} session(s)</td>
       </tr>`).join('')}
     </tbody></table>`;
@@ -156,6 +163,8 @@ async function ouvrirFicheStagiaire(id) {
         <div style="flex:1;"><label for="stg-prenom">Prénom</label><input id="stg-prenom" value="${stagiaire ? esc(stagiaire.prenom) : ''}"></div>
         <div style="flex:1;"><label for="stg-nom">Nom</label><input id="stg-nom" value="${stagiaire ? esc(stagiaire.nom) : ''}"></div>
       </div>
+      <label for="stg-nom-naissance">Nom de naissance <span style="font-weight:normal;color:#55636c;">(si différent du nom ci-dessus — exigé par Passeport de prévention)</span></label>
+      <input id="stg-nom-naissance" maxlength="30" value="${stagiaire ? esc(stagiaire.nom_naissance) : ''}">
       <label for="stg-client">Entreprise</label>
       <select id="stg-client">
         <option value="">—</option>
@@ -171,6 +180,18 @@ async function ouvrirFicheStagiaire(id) {
       </div>
       <label for="stg-notes">Notes</label>
       <textarea id="stg-notes" rows="2">${stagiaire ? esc(stagiaire.notes) : ''}</textarea>
+      ${PEUT_GERER_SESSIONS() ? `
+      <div id="stg-nir-bloc" style="margin-top:12px;padding:10px 12px;background:#f6f8f9;border:1px solid #dfe5e8;border-radius:8px;">
+        <label for="stg-nir" style="margin-top:0;">N° de sécurité sociale (NIR) <span style="font-weight:normal;color:#55636c;">— stocké chiffré, jamais imprimé</span></label>
+        <div id="stg-nir-etat" style="font-size:13px;margin-bottom:6px;"></div>
+        <input id="stg-nir" autocomplete="off" placeholder="13 caractères (ou 15 avec la clé) — laisser vide pour ne rien changer" style="max-width:420px;">
+        <div style="margin-top:6px;font-size:12px;">
+          <a href="#" id="stg-nir-voir" style="display:none;">Afficher le NIR (consultation enregistrée)</a>
+          <a href="#" id="stg-nir-effacer" style="display:none;margin-left:12px;color:#b3261e;">Effacer le NIR</a>
+          ${['admin', 'super_admin'].includes(S.vision) && stagiaire ? '<a href="#" id="stg-nir-journal" style="margin-left:12px;">Journal d\'accès</a>' : ''}
+        </div>
+        <div id="stg-nir-journal-zone" style="font-size:12px;color:#55636c;margin-top:6px;"></div>
+      </div>` : ''}
       <div style="margin-top:14px;">
         <button class="bouton" id="stg-valider">Enregistrer</button>
         <button class="bouton" style="background:#eee;color:#333;margin-left:8px;" onclick="$('#stagiaire-fiche').innerHTML=''">Fermer</button>
@@ -180,6 +201,7 @@ async function ouvrirFicheStagiaire(id) {
     <div id="stg-stats"></div>`;
 
   if (stagiaire) chargerStatsStagiaire(stagiaire.id);
+  if (PEUT_GERER_SESSIONS()) brancherNirStagiaire(stagiaire);
 
   $('#stg-valider').onclick = async () => {
     const payload = {
@@ -189,6 +211,7 @@ async function ouvrirFicheStagiaire(id) {
       client_id: $('#stg-client').value || null,
       date_naissance: $('#stg-naissance').value || null,
       lieu_naissance: $('#stg-lieu-naissance').value.trim() || null,
+      nom_naissance: $('#stg-nom-naissance').value.trim() || null,
       email: $('#stg-email').value.trim() || null,
       telephone: $('#stg-telephone').value.trim() || null,
       notes: $('#stg-notes').value.trim() || null,
@@ -199,14 +222,67 @@ async function ouvrirFicheStagiaire(id) {
     bouton.disabled = true;
     $('#stg-erreur').textContent = '';
 
-    const requete = stagiaire
-      ? supa.from('stagiaires').update(payload).eq('id', stagiaire.id)
-      : supa.from('stagiaires').insert({ ...payload, organisation_id: S.organisation.id });
-    const { error } = await requete;
+    let idStagiaire = stagiaire?.id;
+    if (idStagiaire) {
+      const { error } = await supa.from('stagiaires').update(payload).eq('id', idStagiaire);
+      if (error) { bouton.disabled = false; DEBUG.erreur('enregistrerStagiaire', error); $('#stg-erreur').textContent = 'Erreur : ' + error.message; return; }
+    } else {
+      const { data: cree, error } = await supa.from('stagiaires').insert({ ...payload, organisation_id: S.organisation.id }).select('id').single();
+      if (error) { bouton.disabled = false; DEBUG.erreur('enregistrerStagiaire', error); $('#stg-erreur').textContent = 'Erreur : ' + error.message; return; }
+      idStagiaire = cree.id;
+      stagiaire = { id: idStagiaire };   // un nouveau clic sur Enregistrer met à jour au lieu de recréer
+    }
+    // NIR : enregistré à part (chiffré côté base), seulement s'il a été saisi.
+    const saisieNir = $('#stg-nir')?.value.trim();
+    if (saisieNir) {
+      const { error: errNir } = await supa.rpc('nir_definir', { p_stagiaire: idStagiaire, p_nir: saisieNir });
+      if (errNir) {
+        bouton.disabled = false;
+        DEBUG.erreur('nir_definir', errNir);
+        $('#stg-erreur').textContent = 'Stagiaire enregistré, mais NIR refusé : ' + errNir.message;
+        return;
+      }
+    }
     bouton.disabled = false;
-    if (error) { DEBUG.erreur('enregistrerStagiaire', error); $('#stg-erreur').textContent = 'Erreur : ' + error.message; return; }
     toast('Stagiaire enregistré.');
     ecranStagiaires($('#vue'));
+  };
+}
+
+// Bloc NIR de la fiche : état (renseigné ou non), affichage à la demande
+// (chaque consultation est enregistrée dans le journal), effacement, journal.
+function brancherNirStagiaire(stagiaire) {
+  const etat = $('#stg-nir-etat'), voir = $('#stg-nir-voir'), effacer = $('#stg-nir-effacer'), jr = $('#stg-nir-journal');
+  const renseigne = !!stagiaire && window.__nirRenseignes?.has(stagiaire.id);
+  etat.innerHTML = renseigne ? '<span style="color:#1a7f3c;">✔ NIR renseigné (masqué)</span>' : '<span style="color:#8a5a00;">NIR non renseigné</span>';
+  if (renseigne) { voir.style.display = ''; effacer.style.display = ''; }
+  if (voir) voir.onclick = async e => {
+    e.preventDefault();
+    const { data, error } = await supa.rpc('nir_lire', { p_stagiaire: stagiaire.id });
+    if (error) { DEBUG.erreur('nir_lire', error); etat.textContent = 'Erreur : ' + error.message; return; }
+    etat.innerHTML = '<strong style="letter-spacing:1px;">' + esc(data || '') + '</strong> <span style="color:#55636c;">(masqué dans 15 s)</span>';
+    setTimeout(() => { if (etat.isConnected) etat.innerHTML = '<span style="color:#1a7f3c;">✔ NIR renseigné (masqué)</span>'; }, 15000);
+  };
+  if (effacer) effacer.onclick = async e => {
+    e.preventDefault();
+    if (!confirm('Effacer le NIR de ce stagiaire ?')) return;
+    const { error } = await supa.rpc('nir_definir', { p_stagiaire: stagiaire.id, p_nir: '' });
+    if (error) { DEBUG.erreur('nir_definir', error); etat.textContent = 'Erreur : ' + error.message; return; }
+    window.__nirRenseignes.delete(stagiaire.id);
+    toast('NIR effacé.');
+    brancherNirStagiaire(stagiaire);
+    voir.style.display = 'none'; effacer.style.display = 'none';
+  };
+  if (jr) jr.onclick = async e => {
+    e.preventDefault();
+    const zone = $('#stg-nir-journal-zone');
+    zone.textContent = 'Chargement…';
+    const { data, error } = await supa.rpc('nir_journal', { p_stagiaire: stagiaire.id, p_limite: 30 });
+    if (error) { DEBUG.erreur('nir_journal', error); zone.textContent = 'Erreur : ' + error.message; return; }
+    const lib = { lecture: 'consulté', ecriture: 'enregistré', suppression: 'effacé', export: 'exporté' };
+    zone.innerHTML = (data || []).length
+      ? (data || []).map(j => esc(new Date(j.created_at).toLocaleString('fr-FR') + ' — ' + (lib[j.action] || j.action) + ' par ' + j.utilisateur)).join('<br>')
+      : 'Aucun accès enregistré.';
   };
 }
 

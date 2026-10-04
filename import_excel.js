@@ -25,6 +25,7 @@ const COLONNES_ATTENDUES = [
   { cle: 'prenom', prefixe: 'prenom stagiaire' },
   { cle: 'date_naissance', prefixe: 'date de naissance' },
   { cle: 'lieu_naissance', prefixe: 'lieu de naissance' },
+  { cle: 'nom_naissance', prefixe: 'nom de naissance' },   // facultatif — exigé par Passeport de prévention
   { cle: 'statut', prefixe: 'statut' },
   { cle: 'note_moyenne', prefixe: 'note moyenne' },
 ];
@@ -131,6 +132,7 @@ async function analyserImport(lignesBrutes) {
     else if (!codesConnus.has(codeFormation)) erreurs.push(`code formation "${codeFormation}" introuvable au catalogue`);
     if (!nom) erreurs.push('nom manquant');
     if (!prenom) erreurs.push('prénom manquant');
+    if (String(val('nom_naissance') || '').trim().length > 30) erreurs.push('nom de naissance trop long (30 caractères maximum)');
 
     const dDebut = parserDate(val('date_debut'));
     if (dDebut.erreur) erreurs.push('date début : ' + dDebut.erreur);
@@ -158,6 +160,7 @@ async function analyserImport(lignesBrutes) {
       nom, prenom,
       dateNaissance: dNaissance.iso,
       lieuNaissance: String(val('lieu_naissance') || '').trim() || null,
+      nomNaissance: String(val('nom_naissance') || '').trim() || null,
       statut: statut || 'inscrit',
       noteMoyenne: val('note_moyenne') ? Number(val('note_moyenne')) : null,
       erreurs,
@@ -281,6 +284,7 @@ async function executerImport(pretes, aCompleter) {
         nom: l.nom, prenom: l.prenom,
         date_naissance: l.dateNaissance,
         lieu_naissance: l.lieuNaissance,
+        nom_naissance: l.nomNaissance,
       }).select().single();
       if (error) { echecs.push(`Stagiaire ${l.prenom} ${l.nom} non créé : ${error.message}`); stagiairesEnEchec++; continue; }
       stagiaireId = data.id;
@@ -328,10 +332,10 @@ async function executerImport(pretes, aCompleter) {
 // fichier au même format que le modèle d'import, pour que Jérémy puisse
 // compléter la date puis réimporter uniquement ces lignes-là plus tard.
 function telechargerLignesACompleter(aCompleter) {
-  const entetes = ['Client', 'Formation (code)', 'Date debut', 'Date fin', 'Lieu', 'Civilite', 'Nom stagiaire', 'Prenom stagiaire', 'Date de naissance', 'Lieu de naissance', 'Statut', 'Note moyenne'];
+  const entetes = ['Client', 'Formation (code)', 'Date debut', 'Date fin', 'Lieu', 'Civilite', 'Nom stagiaire', 'Prenom stagiaire', 'Date de naissance', 'Lieu de naissance', 'Nom de naissance', 'Statut', 'Note moyenne'];
   const lignes = aCompleter.map(l => [
     l.client, l.codeFormation, '', '', l.lieu || '', l.civilite || '',
-    l.nom, l.prenom, l.dateNaissance || '', l.lieuNaissance || '', l.statut, l.noteMoyenne ?? '',
+    l.nom, l.prenom, l.dateNaissance || '', l.lieuNaissance || '', l.nomNaissance || '', l.statut, l.noteMoyenne ?? '',
   ]);
   const feuille = XLSX.utils.aoa_to_sheet([entetes, ...lignes]);
   const classeur = XLSX.utils.book_new();

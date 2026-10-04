@@ -262,6 +262,9 @@ async function executerImport(pretes, aCompleter) {
     }).select().single();
     if (error) { echecs.push(`Session ${l.codeFormation} du ${l.dateDebut} (${l.client}) non créée : ${error.message}`); continue; }
     sessionsIndex[cleSession] = data.id;
+    // l'entreprise est aussi enregistrée comme client de la session (sinon elle n'apparaît pas dans l'espace client / les conventions)
+    const { error: errSc } = await supa.from('session_clients').insert({ organisation_id: S.organisation.id, session_id: data.id, client_id: clientId });
+    if (errSc && errSc.code !== '23505') echecs.push(`Client non rattaché à la session ${l.codeFormation} du ${l.dateDebut} : ${errSc.message}`);
     rapport.push(`Session créée : ${l.codeFormation} du ${l.dateDebut} — ${l.client}`);
   }
 
@@ -300,6 +303,7 @@ async function executerImport(pretes, aCompleter) {
       organisation_id: S.organisation.id,
       session_id: sessionId,
       stagiaire_id: stagiaireId,
+      client_id: clientId,
       statut: l.statut,
       note_moyenne: l.noteMoyenne,
     });

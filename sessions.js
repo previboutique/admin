@@ -1607,7 +1607,33 @@ async function ajouterParticipant(stagiaireId, sessionId, clientId) {
   toast('Stagiaire ajouté.');
   $('#sp-recherche').value = '';
   $('#sp-resultats').innerHTML = '';
+  await proposerPropagationClient(sessionId, clientId, stagiaireId);
   ouvrirSession(sessionId);
+}
+
+// Si la session a d'autres inscrits sans entreprise, propose de leur donner la même entreprise
+// (seulement quand la session n'a pas d'autre entreprise, pour ne jamais deviner à tort).
+async function proposerPropagationClient(sessionId, clientId, sauf) {
+  try {
+    const [{ data: sc }, { data: sansClient }] = await Promise.all([
+      supa.from('session_clients').select('client_id').eq('session_id', sessionId),
+      supa.from('session_participants').select('id, stagiaire_id, stagiaires(nom, prenom, client_id)').eq('session_id', sessionId).is('client_id', null),
+    ]);
+    const autresClients = (sc || []).filter(x => x.client_id !== clientId);
+    if (autresClients.length) return;                       // session à plusieurs entreprises : on ne devine pas
+    const cibles = (sansClient || []).filter(p => p.stagiaire_id !== sauf && (!p.stagiaires?.client_id || p.stagiaires.client_id === clientId));
+    if (!cibles.length) return;
+    const nom = ((window.__sessionClients || []).find(x => x.client_id === clientId)?.clients?.raison_sociale) || 'cette entreprise';
+    if (!confirm(`Cette session n'a pas d'autre entreprise, et ${cibles.length} autre(s) stagiaire(s) n'ont pas d'entreprise renseignée.\n\nLes rattacher aussi à « ${nom} » (ils sont rattachés dans la session et leur fiche, si elle est vide) ?\n\nOK = oui, tous ; Annuler = non, seulement ce stagiaire.`)) return;
+    const actions = [{ type: 'session_client', session_id: sessionId, client_id: clientId }];
+    cibles.forEach(p => {
+      actions.push({ type: 'participant', participant_id: p.id, client_id: clientId });
+      if (!p.stagiaires?.client_id) actions.push({ type: 'stagiaire', stagiaire_id: p.stagiaire_id, client_id: clientId });
+    });
+    const { data, error } = await supa.rpc('appliquer_rattachements', { p_actions: actions });
+    if (error) { DEBUG.erreur('propagationClient', error); toast('Propagation impossible : ' + error.message, 'erreur'); return; }
+    toast(`${data.inscriptions} inscription(s) rattachée(s) (annulable depuis « Corriger les rattachements »).`);
+  } catch (e) { DEBUG.erreur('proposerPropagationClient', e); }
 }
 
 function ouvrirFormNouveauStagiaire(texteRecherche, sessionId, clientId) {

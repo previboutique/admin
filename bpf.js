@@ -87,8 +87,16 @@ async function chargerEtAfficherBPF() {
   const sessionIds = (sessions || []).map(s => s.id);
   let participants = [];
   if (sessionIds.length) {
-    const { data } = await supa.from('session_participants').select('session_id, statut, stagiaire_id').in('session_id', sessionIds);
-    participants = data || [];
+    // par lots de sessions, et par pages : sinon la base plafonne à 1000 lignes et l'adresse trop longue échoue
+    for (let i = 0; i < sessionIds.length; i += 60) {
+      for (let debut = 0; ; debut += 1000) {
+        const { data, error: errP } = await supa.from('session_participants').select('session_id, statut, stagiaire_id')
+          .in('session_id', sessionIds.slice(i, i + 60)).order('id', { ascending: true }).range(debut, debut + 999);
+        if (errP) { DEBUG.erreur('chargerBPF participants', errP); zone.innerHTML = '<p class="erreur">Erreur de chargement des participants.</p>'; return; }
+        participants.push(...(data || []));
+        if (!data || data.length < 1000) break;
+      }
+    }
   }
 
   window.__bpfAnneeExercice = anneeExercice;

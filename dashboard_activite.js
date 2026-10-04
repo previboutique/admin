@@ -32,15 +32,29 @@ async function ecranTableauBordActivite(vue) {
     </div>
     <div id="da-contenu"><div class="carte">Chargement…</div></div>`;
 
-  const { data, error } = await supa
-    .from('sessions_formation')
-    .select('date_debut, statut, formations_catalogue(categorie)')
-    .neq('statut', 'annulee')
-    .order('date_debut', { ascending: true });
+  // Lecture par pages de 500 : sans cela, la base ne renvoie que 1000 lignes au maximum et les
+  // sessions les plus récentes (triées en dernier) disparaissaient du tableau de bord.
+  const toutes = [];
+  for (let debut = 0; debut < 50000; debut += 500) {
+    const { data: page, error } = await supa
+      .from('sessions_formation')
+      .select('id, date_debut, statut, formations_catalogue(categorie)')
+      .order('date_debut', { ascending: true }).order('id', { ascending: true })
+      .range(debut, debut + 499);
+    if (error) { DEBUG.erreur('ecranTableauBordActivite', error); $('#da-contenu').innerHTML = '<div class="carte">Erreur de chargement.</div>'; return; }
+    toutes.push(...(page || []));
+    if (!page || page.length < 500) break;
+  }
 
-  if (error) { DEBUG.erreur('ecranTableauBordActivite', error); $('#da-contenu').innerHTML = '<div class="carte">Erreur de chargement.</div>'; return; }
-
-  window.__daSessions = (data || []).filter(s => s.date_debut);
+  // Ce qui est compté et ce qui ne l'est pas (affiché sous les chiffres pour que l'écart soit explicable)
+  const ecartes = {
+    total: toutes.length,
+    annulees: toutes.filter(s => s.statut === 'annulee').length,
+    sansDate: toutes.filter(s => !s.date_debut).length,
+    avant2000: toutes.filter(s => s.date_debut && s.date_debut < '2000-01-01' && s.statut !== 'annulee').length,
+  };
+  window.__daEcartes = ecartes;
+  window.__daSessions = toutes.filter(s => s.date_debut && s.statut !== 'annulee' && s.date_debut >= '2000-01-01');
 
   const anneeEnCours = new Date().getFullYear();
   const annees = [...new Set(window.__daSessions.map(s => Number(s.date_debut.slice(0, 4))))].sort((a, b) => b - a);
@@ -48,6 +62,19 @@ async function ecranTableauBordActivite(vue) {
   $('#da-annee').innerHTML = annees.map(a => `<option value="${a}" ${a === anneeEnCours ? 'selected' : ''}>${a}</option>`).join('');
 
   rafraichirTableauBordActivite();
+}
+
+function daNoteEcarts() {
+  const e = window.__daEcartes;
+  if (!e) return '';
+  const morceaux = [];
+  if (e.avant2000) morceaux.push(`<strong>${e.avant2000}</strong> session(s) datée(s) 01/01/1900 (date de remplacement d'un import) — non comptées, à dater dans « Corriger les rattachements »`);
+  if (e.sansDate) morceaux.push(`<strong>${e.sansDate}</strong> session(s) sans date`);
+  if (e.annulees) morceaux.push(`<strong>${e.annulees}</strong> session(s) annulée(s) (reportées ou annulées)`);
+  return `<div class="carte" style="font-size:13px;${e.avant2000 || e.sansDate ? 'background:#fff9e8;border-color:#e6c76a;' : ''}">
+    <strong>Contrôle :</strong> ${e.total} session(s) en base, dont ${window.__daSessions.length} comptées dans ce tableau de bord.
+    ${morceaux.length ? '<div style="margin-top:4px;">Non comptées : ' + morceaux.join(' · ') + '.</div>' : ''}
+  </div>`;
 }
 
 function rafraichirTableauBordActivite() {
@@ -107,6 +134,7 @@ function rafraichirTableauBordActivite() {
   }
 
   zone.innerHTML = `
+    ${daNoteEcarts()}
     <div class="carte">
       <div style="display:flex;gap:24px;flex-wrap:wrap;">
         ${daStatTuile('Sessions sur l\'année', totalAnnee)}

@@ -36,15 +36,22 @@ async function ecranTableauBordIntervenants(vue) {
     </div>
     <div id="tbi-contenu"><div class="carte">Chargement…</div></div>`;
 
-  const { data, error } = await supa
-    .from('sessions_formation')
-    .select('date_debut, formateur_id, statut, formations_catalogue(duree_heures), profils:formateur_id(nom, prenom, formateur_externe)')
-    .neq('statut', 'annulee')
-    .order('date_debut', { ascending: true });
+  // Lecture par pages de 500 (la base plafonne chaque requête à 1000 lignes).
+  const data = [];
+  for (let debut = 0; debut < 50000; debut += 500) {
+    const { data: page, error } = await supa
+      .from('sessions_formation')
+      .select('date_debut, formateur_id, statut, formations_catalogue(duree_heures), profils:formateur_id(nom, prenom, formateur_externe)')
+      .neq('statut', 'annulee')
+      .not('date_debut', 'is', null).gte('date_debut', '2000-01-01')
+      .order('date_debut', { ascending: true }).order('id', { ascending: true })
+      .range(debut, debut + 499);
+    if (error) { DEBUG.erreur('ecranTableauBordIntervenants', error); $('#tbi-contenu').innerHTML = '<div class="carte">Erreur de chargement.</div>'; return; }
+    data.push(...(page || []));
+    if (!page || page.length < 500) break;
+  }
 
-  if (error) { DEBUG.erreur('ecranTableauBordIntervenants', error); $('#tbi-contenu').innerHTML = '<div class="carte">Erreur de chargement.</div>'; return; }
-
-  window.__tbiSessions = data || [];
+  window.__tbiSessions = data;
 
   const annees = [...new Set(window.__tbiSessions.map(s => Number(s.date_debut.slice(0, 4))))].sort((a, b) => b - a);
   const anneeEnCours = new Date().getFullYear();

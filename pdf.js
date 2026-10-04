@@ -94,7 +94,7 @@ function ajouterLogoEnTete(doc) {
     let largeur = largeurMax, hauteur = (proprietes.height / proprietes.width) * largeur;
     if (hauteur > hauteurMax) { hauteur = hauteurMax; largeur = (proprietes.width / proprietes.height) * hauteur; }
     const largeurPage = doc.internal.pageSize.getWidth();
-    doc.addImage(logo, proprietes.fileType || 'PNG', largeurPage - MARGE - largeur, 8, largeur, hauteur);
+    doc.addImage(logo, proprietes.fileType || 'PNG', largeurPage - MARGE - largeur, 8, largeur, hauteur, 'logo-organisme', 'FAST');
   } catch (e) { /* image illisible — on ignore, le document reste généré sans logo */ }
 }
 
@@ -110,7 +110,7 @@ function ajouterSignatureEtTampon(doc, x, y, tamponSeul) {
       const proprietes = doc.getImageProperties(image);
       let largeur = largeurMax, hauteur = (proprietes.height / proprietes.width) * largeur;
       if (hauteur > hauteurMax) { hauteur = hauteurMax; largeur = (proprietes.width / proprietes.height) * hauteur; }
-      doc.addImage(image, proprietes.fileType || 'PNG', x - largeur - decalage, y, largeur, hauteur);
+      doc.addImage(image, proprietes.fileType || 'PNG', x - largeur - decalage, y, largeur, hauteur, image === S.organisation?._tamponDataUrl ? 'tampon-organisme' : 'signature-organisme', 'FAST');
       decalage += largeur + 4;
     } catch (e) { /* image illisible — ignorée */ }
   });
@@ -127,7 +127,7 @@ function nomFichierDoc(prefixe, session, stagiaire, nomClient) {
 // CONVOCATION — un document par stagiaire
 // ============================================================================
 function genererConvocation(session, participant, sansTelechargement) {
-  const doc = new jsPDF();
+  const doc = new jsPDF({ compress: true });
   ajouterLogoEnTete(doc);
   const f = session.formations_catalogue;
   const st = participant.stagiaires;
@@ -177,7 +177,7 @@ function genererConvocation(session, participant, sansTelechargement) {
 // ATTESTATION DE FIN DE FORMATION (AFF) — un document par stagiaire
 // ============================================================================
 function genererAFF(session, participant, sansTelechargement) {
-  const doc = new jsPDF();
+  const doc = new jsPDF({ compress: true });
   ajouterLogoEnTete(doc);
   const f = session.formations_catalogue;
   const st = participant.stagiaires;
@@ -263,7 +263,7 @@ function genererAFF(session, participant, sansTelechargement) {
 // CERTIFICAT DE RÉALISATION — un document par stagiaire
 // ============================================================================
 function genererCertificatRealisation(session, participant, sansTelechargement) {
-  const doc = new jsPDF();
+  const doc = new jsPDF({ compress: true });
   // Logo officiel du Ministère du Travail, en haut à gauche — modèle
   // réglementaire du Certificat de réalisation (arrêté du 21 décembre 2018).
   // Ne pas utiliser ce logo ailleurs (voir logo_gouvernement.js).
@@ -271,7 +271,7 @@ function genererCertificatRealisation(session, participant, sansTelechargement) 
     const proprietesLogoGouv = doc.getImageProperties(LOGO_MINISTERE_TRAVAIL_BASE64);
     const largeurLogoGouv = 28;
     const hauteurLogoGouv = (proprietesLogoGouv.height / proprietesLogoGouv.width) * largeurLogoGouv;
-    doc.addImage(LOGO_MINISTERE_TRAVAIL_BASE64, 'PNG', MARGE, 10, largeurLogoGouv, hauteurLogoGouv);
+    doc.addImage(LOGO_MINISTERE_TRAVAIL_BASE64, 'PNG', MARGE, 10, largeurLogoGouv, hauteurLogoGouv, 'logo-ministere', 'FAST');
   } catch (e) { /* logo illisible — le document reste généré sans lui */ }
   ajouterLogoEnTete(doc);
   const f = session.formations_catalogue;
@@ -343,7 +343,7 @@ function client_ville_txt(client) {
 // participants.
 // ============================================================================
 function genererConvention(session, participants, sansTelechargement, clientEntry) {
-  const doc = new jsPDF();
+  const doc = new jsPDF({ compress: true });
   ajouterLogoEnTete(doc);
   const f = session.formations_catalogue;
   const client = clientEntry ? clientEntry.clients : session.clients;
@@ -484,7 +484,7 @@ function formatDateCourte(d) {
 function genererFeuillePresence(session, participants, sansTelechargement) {
   const jours = joursDeLaSession(session);
   const paysage = jours.length > 3;
-  const doc = new jsPDF(paysage ? { orientation: 'landscape' } : undefined);
+  const doc = new jsPDF({ compress: true, ...(paysage ? { orientation: 'landscape' } : {}) });
   const largeurPage = doc.internal.pageSize.width;
   ajouterLogoEnTete(doc);
   const f = session.formations_catalogue;
@@ -566,7 +566,7 @@ function genererFeuillePresence(session, participants, sansTelechargement) {
 // Les données (donnees) sont calculées dans bpf.js.
 // ============================================================================
 function genererDocumentBPF(exercice, donnees) {
-  const doc = new jsPDF();
+  const doc = new jsPDF({ compress: true });
   ajouterLogoEnTete(doc);
   let y = 18;
 

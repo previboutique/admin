@@ -69,6 +69,28 @@ async function chargerProfil() {
   appliquerIdentiteVisuelle();
 }
 
+// Réduit une image (data URL) pour que sa plus grande dimension ne dépasse pas
+// `max` pixels, en conservant la transparence (PNG). En cas de problème,
+// renvoie l'image d'origine.
+function reduireImage(dataUrl, max) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const echelle = Math.min(1, max / Math.max(img.width, img.height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * echelle));
+        canvas.height = Math.max(1, Math.round(img.height * echelle));
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        const reduite = canvas.toDataURL('image/png');
+        resolve(reduite.length < dataUrl.length ? reduite : dataUrl);
+      } catch (e) { resolve(dataUrl); }
+    };
+    img.onerror = () => resolve(dataUrl);
+    img.src = dataUrl;
+  });
+}
+
 // Précharge logo/signature/tampon en base64 (data URL) sur S.organisation,
 // pour un usage synchrone dans pdf.js (évite de rendre chaque générateur de
 // PDF asynchrone juste pour aller chercher une image sur le réseau).
@@ -80,12 +102,16 @@ async function chargerImagesIdentite() {
     try {
       const reponse = await fetch(url);
       const blob = await reponse.blob();
-      S.organisation[champCache] = await new Promise((resolve, reject) => {
+      const original = await new Promise((resolve, reject) => {
         const lecteur = new FileReader();
         lecteur.onload = () => resolve(lecteur.result);
         lecteur.onerror = reject;
         lecteur.readAsDataURL(blob);
       });
+      // Réduite à 400 px max : ces images sont incorporées dans chaque PDF
+      // (parfois plusieurs fois) — une photo de plusieurs Mo les rendait
+      // énormes (ZIP de 42 Mo pour une session).
+      S.organisation[champCache] = await reduireImage(original, 400);
     } catch (e) {
       DEBUG.erreur('chargerImagesIdentite', e);
       S.organisation[champCache] = null;

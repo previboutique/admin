@@ -1278,7 +1278,7 @@ async function copierLienEvaluation() {
 
 function telechargerAfficheQr() {
   const s = window.__sessionCourante;
-  const doc = new jsPDF();
+  const doc = new jsPDF({ compress: true });
   if (typeof ajouterLogoEnTete === 'function') ajouterLogoEnTete(doc);
   const f = s.formations_catalogue;
   doc.setFont('helvetica', 'bold'); doc.setFontSize(20); doc.setTextColor(10, 92, 138);

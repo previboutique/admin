@@ -142,6 +142,17 @@ async function chargerFamilles() {
   rendreListeFamilles();
 }
 
+// Affiche des codes avec une infobulle (survol) donnant leur libellé.
+function codesInfobulle(codes, carte) {
+  return (codes || []).map(c => {
+    const lib = carte && carte.get ? carte.get(c) : null;
+    return `<span title="${esc(c + ' — ' + (lib || 'libellé non trouvé dans le référentiel'))}" style="cursor:help;border-bottom:1px dotted #8a97a0;white-space:nowrap;">${esc(c)}</span>`;
+  }).join(' / ');
+}
+function listeInfobulle(codes, carte) {
+  return (codes || []).map(c => c + ' — ' + ((carte && carte.get && carte.get(c)) || 'libellé non trouvé')).join('\n');
+}
+
 function rendreResumeFamilles() {
   const familles = window.__familles, fiches = window.__fichesFamilles.filter(f => f.actif);
   const nonRattachees = fiches.filter(f => !f.famille_id);
@@ -196,10 +207,10 @@ function rendreListeFamilles() {
           <div><span style="font-size:11px;background:${fi.fond};color:${fi.couleur};border-radius:10px;padding:1px 8px;">${esc(fi.libelle)}</span>
           ${g.organisation_id ? '' : '<span style="font-size:11px;background:#eceff1;color:#55636c;border-radius:10px;padding:1px 8px;margin-left:4px;">Commune</span>'}</div></td>
         <td style="padding:6px 8px;">${g.certifiante ? 'Oui' : 'Non'}</td>
-        <td style="padding:6px 8px;">${esc((g.codes_nsf || []).join(' / ')) || '—'}</td>
-        <td style="padding:6px 8px;">${esc((g.codes_formacode || []).join(' / ')) || '—'}</td>
-        <td style="padding:6px 8px;">${(g.codes_rome || []).length}</td>
-        <td style="padding:6px 8px;">${(g.codes_rs || []).length ? (g.codes_rs.length === 1 ? esc(g.codes_rs[0]) : g.codes_rs.length + ' codes') : '—'}</td>
+        <td style="padding:6px 8px;">${codesInfobulle(g.codes_nsf, window.__ppRef?.nsf) || '—'}</td>
+        <td style="padding:6px 8px;">${codesInfobulle(g.codes_formacode, window.__ppRef?.formacode) || '—'}</td>
+        <td style="padding:6px 8px;"><span title="${esc(listeInfobulle(g.codes_rome, window.__ppRef?.rome))}" style="cursor:help;border-bottom:1px dotted #8a97a0;">${(g.codes_rome || []).length}</span></td>
+        <td style="padding:6px 8px;">${(g.codes_rs || []).length ? `<span title="${esc(listeInfobulle(g.codes_rs, window.__ppRef?.rs))}" style="cursor:help;border-bottom:1px dotted #8a97a0;">${g.codes_rs.length === 1 ? esc(g.codes_rs[0]) : g.codes_rs.length + ' codes'}</span>` : '—'}</td>
         <td style="padding:6px 8px;">${etat}</td>
         <td style="padding:6px 8px;font-size:12px;color:#55636c;">${rattachees.length ? rattachees.map(f => esc(f.code)).join(', ') : '—'}</td>
         <td style="padding:6px 8px;text-align:right;"><button class="bouton" style="padding:4px 10px;font-size:12px;" onclick="ouvrirFormFamille('${g.id}')">${['admin', 'super_admin'].includes(S.profil?.role) ? 'Modifier' : 'Voir'}</button></td>

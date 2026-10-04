@@ -813,6 +813,7 @@ async function ouvrirSession(id) {
         : `<button class="bouton" style="margin:0 8px 8px 0;" onclick="genererConvention(window.__sessionCourante, window.__participantsCourants)">Convention</button>`}
       <button class="bouton" style="margin:0 0 8px;" onclick="genererFeuillePresence(window.__sessionCourante, window.__participantsCourants)">Feuille d'émargement</button>
       ${PEUT_GERER_SESSIONS() ? `<button class="bouton" style="margin:0 0 8px 8px;" onclick="genererFicheSynthese(window.__sessionCourante, window.__participantsCourants)">Feuille de synthèse (A3, usage interne)</button>` : ''}
+      ${grilleSstType(session) ? `<button class="bouton" style="margin:0 0 8px 8px;" onclick="genererGrillesSstSession(window.__sessionCourante, window.__participantsCourants)">Grilles de certification ${grilleSstType(session) === 'mac' ? 'MAC SST' : 'SST'} (un PDF par stagiaire)</button>` : ''}
       <p style="font-size:12px;color:#55636c;margin:8px 0 0;">Chaque client a sa propre Convention (tarif et liste de stagiaires qui lui sont rattachés). La feuille d'émargement n'a pas de modèle papier de référence confirmé — mise en page à ajuster si besoin.</p>
     </div>
 
@@ -826,6 +827,7 @@ async function ouvrirSession(id) {
 
     <div class="carte" id="qr-emarg-zone"></div>
     <div class="carte" id="qr-eval-zone"></div>
+    <div class="carte" id="positionnement-session"></div>
     <div class="carte" id="synthese-zone"></div>
 
     <div class="carte">
@@ -848,6 +850,7 @@ async function ouvrirSession(id) {
   rendreParticipants(session, participants || []);
   rendreQrEvaluation(session);
   rendreQrEmargement(session);
+  if (typeof rendrePositionnementSession === 'function') rendrePositionnementSession();
   window.__emargementsSession = undefined;
   rendreSelectionDocuments(session, participants || []);
   rendreSuiviEspaceClientSession(session);
@@ -1200,12 +1203,14 @@ function rendreParticipants(session, participants) {
         </select>
         <button class="bouton" style="padding:5px 10px;font-size:12px;" onclick="toggleFise('${p.id}')">FISE / compétences</button>
         <button class="bouton" style="padding:5px 10px;font-size:12px;" onclick="toggleEvaluation('${p.id}')">Évaluation stagiaire</button>
+        ${grilleSstType(window.__sessionCourante) ? `<button class="bouton" style="padding:5px 10px;font-size:12px;" onclick="toggleGrilleSst('${p.id}')">Grille ${grilleSstType(window.__sessionCourante) === 'mac' ? 'MAC SST' : 'SST'}</button>` : ''}
         <button class="bouton" style="padding:5px 10px;font-size:12px;background:#eee;color:#333;" onclick="genererConvocation(window.__sessionCourante, window.__participantsCourants.find(x=>x.id==='${p.id}'))">Convocation</button>
         <button class="bouton" style="padding:5px 10px;font-size:12px;background:#eee;color:#333;" onclick="genererAFF(window.__sessionCourante, window.__participantsCourants.find(x=>x.id==='${p.id}'))">AFF</button>
         <button class="bouton" style="padding:5px 10px;font-size:12px;background:#eee;color:#333;" onclick="genererCertificatRealisation(window.__sessionCourante, window.__participantsCourants.find(x=>x.id==='${p.id}'))">Certificat</button>
       </div>
       <div id="fise-${p.id}" style="display:none;margin-top:12px;"></div>
       <div id="eval-${p.id}" style="display:none;margin-top:12px;"></div>
+      <div id="grille-${p.id}" style="display:none;margin-top:12px;"></div>
     </div>`).join('');
 
   $$('.sp-statut').forEach(sel => {
@@ -1234,7 +1239,7 @@ const gradeFiseCompat = a => a === true ? 'acquis' : a === false ? 'non_acquis' 
 function toggleFise(participantId) {
   const zone = $('#fise-' + participantId);
   const visible = zone.style.display !== 'none';
-  $$('[id^="fise-"], [id^="eval-"]').forEach(z => z.style.display = 'none');
+  $$('[id^="fise-"], [id^="eval-"], [id^="grille-"]').forEach(z => z.style.display = 'none');
   if (visible) return;
 
   const p = window.__participantsCourants.find(x => x.id === participantId);
@@ -1280,7 +1285,7 @@ async function enregistrerFise(participantId) {
 function toggleEvaluation(participantId) {
   const zone = $('#eval-' + participantId);
   const visible = zone.style.display !== 'none';
-  $$('[id^="fise-"], [id^="eval-"]').forEach(z => z.style.display = 'none');
+  $$('[id^="fise-"], [id^="eval-"], [id^="grille-"]').forEach(z => z.style.display = 'none');
   if (visible) return;
 
   const p = window.__participantsCourants.find(x => x.id === participantId);
@@ -1409,19 +1414,50 @@ function urlEvaluation(session) {
   return new URL('evaluation.html', location.href).href.split('?')[0] + '?t=' + session.token_evaluation;
 }
 
-function qrDataUrl(texte, taille) {
-  const qr = qrcode(0, 'M');
+// QR code aux couleurs de Prévisecours (rouge #E52231 / bleu #2473B5, croix au centre), niveau de
+// correction d'erreur élevé (H) pour que le logo central ne gêne pas la lecture. Rendu PNG sur canvas.
+// opts.simple = true : QR noir classique (secours).
+function qrDataUrl(texte, taille, opts) {
+  opts = opts || {};
+  const qr = qrcode(0, opts.simple ? 'M' : 'H');
   qr.addData(texte);
   qr.make();
-  // Dessiné sur un canvas pour obtenir un vrai PNG (la bibliothèque produit
-  // un GIF, mal accepté par jsPDF).
   const n = qr.getModuleCount(), marge = 2, px = taille || 8;
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = (n + 2 * marge) * px;
   const ctx = canvas.getContext('2d');
   ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = '#000';
-  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr.isDark(r, c)) ctx.fillRect((c + marge) * px, (r + marge) * px, px, px);
+  const ROUGE = '#E52231', BLEU = '#2473B5', moitie = n / 2;
+  const quadrant = (r, c) => ((r < moitie) === (c < moitie)) ? BLEU : ROUGE;   // haut-gauche et bas-droite bleus, autres rouges
+  const oeil = (r, c) => {                                                      // position dans un des 3 repères (7x7), sinon null
+    const coins = [[0, 0], [0, n - 7], [n - 7, 0]];
+    for (const [r0, c0] of coins) if (r >= r0 && r < r0 + 7 && c >= c0 && c < c0 + 7) return { r: r - r0, c: c - c0 };
+    return null;
+  };
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+    if (!qr.isDark(r, c)) continue;
+    let couleur = opts.simple ? '#000' : quadrant(r, c);
+    const o = oeil(r, c);
+    if (!opts.simple && o && o.r >= 2 && o.r <= 4 && o.c >= 2 && o.c <= 4) couleur = (couleur === BLEU ? ROUGE : BLEU);  // centre du repère : couleur inverse
+    ctx.fillStyle = couleur;
+    ctx.fillRect((c + marge) * px, (r + marge) * px, px, px);
+  }
+  if (!opts.simple) {
+    // Croix Prévisecours au centre : moitié haute/gauche rouge, moitié basse/droite bleue, séparées par une fine diagonale blanche
+    const L = canvas.width, centre = L / 2, boite = L * 0.27, S = L * 0.20, t = S / 3;
+    ctx.fillStyle = '#fff'; ctx.fillRect(centre - boite / 2, centre - boite / 2, boite, boite);
+    const croix = (couleur, clip) => {
+      ctx.save();
+      if (clip) { ctx.beginPath(); ctx.moveTo(centre + S, centre - S); ctx.lineTo(centre + S, centre + S); ctx.lineTo(centre - S, centre + S); ctx.closePath(); ctx.clip(); }
+      ctx.fillStyle = couleur;
+      ctx.fillRect(centre - t / 2, centre - S / 2, t, S);
+      ctx.fillRect(centre - S / 2, centre - t / 2, S, t);
+      ctx.restore();
+    };
+    croix(ROUGE, false); croix(BLEU, true);
+    ctx.strokeStyle = '#fff'; ctx.lineWidth = Math.max(1, L * 0.008);
+    ctx.beginPath(); ctx.moveTo(centre + S / 2, centre - S / 2); ctx.lineTo(centre - S / 2, centre + S / 2); ctx.stroke();
+  }
   return canvas.toDataURL('image/png');
 }
 

@@ -1,0 +1,142 @@
+<!--
+  © 2026 Admin Formation — Jérémy Bizeul — SARL Prévisecours.
+  Tous droits réservés. Toute reproduction, distribution ou réutilisation de ce code,
+  en tout ou partie, sans autorisation écrite préalable est interdite.
+  Auteur : Jérémy Bizeul — jeremy@bizeul.fr
+-->
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<meta name="author" content="Jérémy Bizeul (SARL Prévisecours)">
+<meta name="copyright" content="© 2026 Jérémy Bizeul / SARL Prévisecours. Tous droits réservés.">
+<title>Questionnaire de positionnement</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<style>
+  :root { --primaire: #0a5c8a; --fond: #f4f6f8; --texte: #1c2b36; --bordure: #d7dee3; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Arial, sans-serif; background: var(--fond); color: var(--texte); }
+  header { background: var(--primaire); color: #fff; padding: 14px 16px; }
+  header h1 { font-size: 17px; margin: 0; }
+  header p { margin: 4px 0 0; font-size: 13px; opacity: .9; }
+  main { max-width: 560px; margin: 0 auto; padding: 16px 16px 60px; }
+  .carte { background: #fff; border: 1px solid var(--bordure); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
+  .question { font-size: 15px; margin: 0 0 10px; font-weight: 600; }
+  .notes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .notes button { border: 1px solid var(--bordure); background: #fff; border-radius: 8px; padding: 12px 0; font-size: 18px; font-weight: 600; cursor: pointer; color: var(--texte); }
+  .notes button.choisi { background: var(--primaire); color: #fff; border-color: var(--primaire); }
+  .legende { display: flex; justify-content: space-between; font-size: 11px; color: #55636c; margin-top: 4px; }
+  textarea, select { font: inherit; width: 100%; padding: 10px; border: 1px solid var(--bordure); border-radius: 8px; }
+  button.principal { width: 100%; background: var(--primaire); color: #fff; border: none; border-radius: 10px; padding: 14px; font-size: 16px; font-weight: 600; cursor: pointer; }
+  button.principal:disabled { opacity: .5; }
+  .erreur { color: #b3261e; font-size: 14px; margin-top: 10px; }
+  .info { font-size: 14px; color: #55636c; }
+  .grand { font-size: 17px; text-align: center; padding: 20px 8px; }
+  .option { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--bordure); border-radius: 8px; margin-bottom: 8px; cursor: pointer; font-size: 15px; }
+  .option input { margin-top: 3px; flex: none; width: 18px; height: 18px; }
+  .option.choisi { border-color: var(--primaire); background: #eef6fb; }
+  .recap { width: 100%; border-collapse: collapse; font-size: 15px; }
+  .recap td { padding: 6px 0; vertical-align: top; }
+  .recap td:first-child { color: #55636c; width: 42%; padding-right: 10px; }
+  .indice { font-size: 12px; color: #55636c; font-weight: normal; }
+  .reglement { white-space: pre-wrap; font-size: 14px; line-height: 1.5; max-height: 55vh; overflow-y: auto; border: 1px solid var(--bordure); border-radius: 8px; padding: 12px; background: #fcfcfd; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="titre">Questionnaire de positionnement</h1>
+  <p id="sous-titre"></p>
+</header>
+<main id="contenu"><p class="info">Chargement…</p></main>
+
+<script>
+// © 2026 Jérémy Bizeul / SARL Prévisecours — Tous droits réservés.
+// Page publique du questionnaire de positionnement (QR code personnel de la convocation).
+const SUPABASE_URL = 'https://kzahahrnauynnrfznkje.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_VpOYj7KajWRHJKyjPyLh_g_mgabFpgZ';
+const supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const token = new URLSearchParams(location.search).get('t');
+function dateFr(iso) { return iso ? new Date(iso + 'T12:00:00').toLocaleDateString('fr-FR') : ''; }
+function message(txt) { $('#contenu').innerHTML = `<div class="carte grand">${esc(txt)}</div>`; }
+async function chargerParcours() {
+  if (!token || !/^[0-9a-f-]{36}$/i.test(token)) { message('Lien invalide. Scannez à nouveau le QR code de votre convocation.'); return null; }
+  const { data, error } = await supa.rpc('parcours_charger', { p_token: token });
+  if (error || !data) { message('Impossible de charger la page. Vérifiez votre connexion et réessayez.'); return null; }
+  if (!data.ok) { message(data.message || 'Lien invalide.'); return null; }
+  return data;
+}
+function recapHtml(d) {
+  const plage = dateFr(d.date_debut) + (d.date_fin && d.date_fin !== d.date_debut ? ' au ' + dateFr(d.date_fin) : '');
+  return `<table class="recap">
+    <tr><td>Nom &amp; Prénom</td><td><strong>${esc(d.prenom)} ${esc(String(d.nom || '').toUpperCase())}</strong></td></tr>
+    ${d.entreprise ? `<tr><td>Entreprise</td><td>${esc(d.entreprise)}</td></tr>` : ''}
+    <tr><td>Date de la formation</td><td>${esc(plage)}</td></tr>
+    ${d.type_formation ? `<tr><td>Type de formation</td><td>${d.type_formation === 'recyclage' ? 'Recyclage' : 'Initiale'}</td></tr>` : ''}
+    <tr><td>Formation</td><td>${esc(d.formation)}</td></tr>
+  </table>`;
+}
+
+let parcours = null;
+const choix = {};   // id question -> [indices]
+
+async function demarrer() {
+  parcours = await chargerParcours();
+  if (!parcours) return;
+  const p = parcours.positionnement;
+  $('#sous-titre').textContent = parcours.organisme || '';
+  if (!p.ouvert) { message(p.message || 'Le questionnaire n\'est pas ouvert.'); return; }
+  $('#contenu').innerHTML = `
+    <div class="carte">
+      <p class="question" style="font-size:17px;">Bonjour ${esc(parcours.prenom)} !</p>
+      ${recapHtml(parcours)}
+      <p class="info">Ce questionnaire a pour but d'évaluer vos connaissances dans le domaine afin d'adapter au mieux la formation. Il n'y a aucune sanction : répondez sans chercher, « Je ne sais pas » est une réponse acceptée.</p>
+      ${p.deja_repondu ? '<p class="info"><strong>Vous avez déjà répondu.</strong> Vous pouvez recommencer : vos nouvelles réponses remplaceront les précédentes.</p>' : ''}
+      <button class="principal" id="suivant">Suivant</button>
+    </div>`;
+  $('#suivant').onclick = afficherQuestions;
+}
+
+function afficherQuestions() {
+  const qs = parcours.positionnement.questions;
+  $('#titre').textContent = parcours.theme || 'Questionnaire de positionnement';
+  $('#contenu').innerHTML = `
+    <p class="info">${qs.length} questions. Cochez la ou les bonnes réponses.</p>
+    ${qs.map((q, i) => `
+      <div class="carte" data-q="${esc(q.id)}">
+        <p class="question">${i + 1}. ${esc(q.libelle)} ${q.type === 'multiple' ? '<span class="indice">(plusieurs réponses possibles)</span>' : ''}</p>
+        ${q.options.map((o, k) => `
+          <label class="option"><input type="${q.type === 'multiple' ? 'checkbox' : 'radio'}" name="q${i}" data-k="${k}"><span>${esc(o)}</span></label>`).join('')}
+      </div>`).join('')}
+    <button class="principal" id="envoyer">Envoyer mes réponses</button>
+    <div class="erreur" id="erreur"></div>`;
+  document.querySelectorAll('.carte[data-q]').forEach(carte => {
+    carte.querySelectorAll('input').forEach(inp => inp.onchange = () => {
+      choix[carte.dataset.q] = [...carte.querySelectorAll('input:checked')].map(x => Number(x.dataset.k));
+      carte.querySelectorAll('.option').forEach(l => l.classList.toggle('choisi', l.querySelector('input').checked));
+    });
+  });
+  $('#envoyer').onclick = envoyer;
+  window.scrollTo(0, 0);
+}
+
+async function envoyer() {
+  $('#erreur').textContent = '';
+  const qs = parcours.positionnement.questions;
+  const manquantes = qs.filter(q => !(choix[q.id] && choix[q.id].length));
+  if (manquantes.length) { $('#erreur').textContent = `Merci de répondre à toutes les questions (${manquantes.length} restante${manquantes.length > 1 ? 's' : ''}).`; return; }
+  $('#envoyer').disabled = true;
+  const { error } = await supa.rpc('positionnement_enregistrer', { p_token: token, p_reponses: choix });
+  if (error) { $('#erreur').textContent = error.message || 'Erreur lors de l\'envoi.'; $('#envoyer').disabled = false; return; }
+  $('#titre').textContent = 'Questionnaire de positionnement';
+  message('Merci, vos réponses ont bien été enregistrées. Votre formateur les utilisera pour adapter la formation.');
+}
+
+demarrer();
+</script>
+<footer style="text-align:center;font-size:11px;color:#464645;opacity:.7;padding:0 16px 24px;">© 2026 Jérémy Bizeul / SARL Prévisecours</footer>
+</body>
+</html>

@@ -102,7 +102,8 @@ async function ecranOrganisation(vue) {
       </div>
       <button class="bouton" style="margin-top:12px;" id="og-valider-smtp">Enregistrer</button>
       <div class="erreur" id="og-erreur-smtp"></div>
-    </div>`;
+    </div>
+    ${typeof carteReglementInterieur === 'function' ? carteReglementInterieur(org) : ''}`;
 
   ['logo', 'signature', 'tampon'].forEach(cle => {
     const input = $('#og-fichier-' + cle);

@@ -39,6 +39,8 @@ async function chargerCatalogue() {
   window.__catalogueCourant = data || [];
   const { data: fam } = await supa.from('familles_formation').select('id, nom, fiabilite').eq('actif', true).order('nom');
   window.__famillesCatalogue = fam || [];
+  const { data: themesPos } = await supa.from('positionnement_questions').select('theme');
+  window.__themesPositionnement = [...new Set((themesPos || []).map(x => x.theme))].sort((a, b) => a.localeCompare(b, 'fr'));
 
   if (!data || data.length === 0) { zone.innerHTML = '<p style="color:#55636c;">Aucune formation au catalogue.</p>'; return; }
 
@@ -173,6 +175,11 @@ function ouvrirFormFormation(id) {
         ${autres.map(a => `<option value="${a.id}" ${f && f.formation_recyclage_id === a.id ? 'selected' : ''}>${esc(a.denomination)} (${esc(a.code)})</option>`).join('')}
       </select>
 
+      <label for="cf-theme-pos">Thème du questionnaire de positionnement (QR code de la convocation)</label>
+      <input id="cf-theme-pos" list="cf-themes-pos" value="${f ? esc(f.theme_positionnement || '') : ''}" placeholder="— aucun questionnaire —">
+      <datalist id="cf-themes-pos">${(window.__themesPositionnement || []).map(t => `<option value="${esc(t)}">`).join('')}</datalist>
+      <p style="font-size:12px;color:#55636c;margin:2px 0 0;">Les questions de ce thème se gèrent dans l'onglet « Positionnement ». Laisser vide = pas de questionnaire pour cette formation.</p>
+
       ${(window.__famillesCatalogue || []).length ? `
       <label for="cf-famille">Famille de codes Passeport de prévention (NSF, Formacode, ROME, RS)</label>
       <select id="cf-famille">
@@ -265,6 +272,8 @@ function ouvrirFormFormation(id) {
     };
 
     if ($('#cf-famille')) payload.famille_id = $('#cf-famille').value || null;
+    // n'écrit le thème que si la colonne existe (patch SQL exécuté), pour ne jamais bloquer l'enregistrement d'une fiche
+    if ((window.__catalogueCourant || []).length && 'theme_positionnement' in window.__catalogueCourant[0]) payload.theme_positionnement = $('#cf-theme-pos').value.trim() || null;
 
     if (!payload.code || !payload.categorie || !payload.denomination) {
       $('#cf-erreur').textContent = 'Code, catégorie et dénomination sont obligatoires.';

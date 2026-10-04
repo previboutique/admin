@@ -166,6 +166,30 @@ function genererConvocation(session, participant, sansTelechargement) {
     y += 6;
   }
 
+  // QR codes PERSONNELS du stagiaire : questionnaire de positionnement et règlement intérieur (voir positionnement.js)
+  const qrs = [];
+  if (participant.token_acces && typeof qrDataUrl === 'function' && typeof qrcode === 'function' && typeof urlPositionnement === 'function') {
+    try {
+      if (f?.theme_positionnement) qrs.push({ img: qrDataUrl(urlPositionnement(participant), 6), titre: 'Questionnaire de positionnement', texte: 'À remplir avant la formation (quelques minutes)' });
+      if ((S.organisation?.reglement_interieur || '').trim()) qrs.push({ img: qrDataUrl(urlReglement(participant), 6), titre: 'Règlement intérieur', texte: 'À lire et à valider avant la formation' });
+    } catch (e) { /* QR impossible : la convocation reste générée sans */ }
+  }
+  if (qrs.length) {
+    if (y > 200) { doc.addPage(); y = 25; }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5);
+    doc.text('Avant la formation, scannez avec votre téléphone (codes personnels, ne pas partager) :', MARGE, y); y += 5;
+    const taille = 34, ecart = (LARGEUR_UTILE - qrs.length * taille) / (qrs.length + 1);
+    qrs.forEach((q, i) => {
+      const x = MARGE + ecart * (i + 1) + taille * i;
+      doc.addImage(q.img, 'PNG', x, y, taille, taille, 'qr-conv-' + i, 'FAST');
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(9);
+      doc.text(q.titre, x + taille / 2, y + taille + 4, { align: 'center' });
+      doc.setFont('helvetica', 'normal'); doc.setFontSize(8);
+      doc.text(doc.splitTextToSize(q.texte, taille + 14), x + taille / 2, y + taille + 8, { align: 'center' });
+    });
+    y += taille + 24;
+  }
+
   y = paragraphe(doc, `Veuillez recevoir ${st.civilite || ''} ${st.nom} , l'expression de nos sincères salutations.`, y, { apres: 10 });
   doc.setFont('helvetica', 'bold');
   doc.text(S.organisation.raison_sociale, 195, y, { align: 'right' });

@@ -152,13 +152,31 @@ function fsConstruire(doc, d, polices) {
   const stat = (s, centres) => { if (!s) return; [s.at, s.mp, s.itt].forEach((v, i) => { if (v !== null && v !== undefined) texte(centres[i] - largeur(String(v), 12, false) / 2, 553.5, 12, false, String(v)); }); };
   stat(d.statN1, [922, 962, 1004]); stat(d.statN2, [1072, 1112, 1154]);
 
-  // Liste des inscrits : 5 lignes x 2 colonnes, remplies de gauche à droite
-  d.inscrits.slice(0, 10).forEach((p, i) => {
-    const x = i % 2 === 0 ? 21.3 : 311.4, haut = 505.5 + 48 * Math.floor(i / 2);
-    texte(x, haut, 12, false, tronque('Identité : ' + p.identite, 12, false, 262));
-    texte(x, haut + 24, 12, false, tronque('Employeur : ' + p.employeur, 12, false, 262));
-  });
-  if (d.inscrits.length > 10) texte(21.3, 760, 11, false, `+ ${d.inscrits.length - 10} autre(s) stagiaire(s) non listé(s) — voir la liste de la session`, '#C00000');
+  // Liste des inscrits : jusqu'à 10 stagiaires = présentation du modèle (5 lignes x 2 colonnes) ;
+  // de 11 à 20 = présentation resserrée (10 lignes x 2 colonnes, texte plus petit) ; au-delà de 20 : mention.
+  const MAX_INSCRITS = 20;
+  if (d.inscrits.length <= 10) {
+    d.inscrits.forEach((p, i) => {
+      const x = i % 2 === 0 ? 21.3 : 311.4, haut = 505.5 + 48 * Math.floor(i / 2);
+      texte(x, haut, 12, false, tronque('Identité : ' + p.identite, 12, false, 262));
+      texte(x, haut + 24, 12, false, tronque('Employeur : ' + p.employeur, 12, false, 262));
+    });
+  } else {
+    // on retire les 10 cadres du modèle et on dessine 20 cadres plus bas
+    doc.setFillColor(255, 255, 255);
+    doc.rect(10, 500, 590, 60 + 240, 'F');
+    const ph = 29.5;
+    for (let i = 0; i < MAX_INSCRITS; i++) {
+      const bx = i % 2 === 0 ? 18 : 308, by = 502 + ph * Math.floor(i / 2);
+      cadres([[bx, by, 1, 28], [bx + 1, by, 280, 1], [bx + 1, by + 27, 280, 1], [bx + 280, by + 1, 1, 27]]);
+      const p = d.inscrits[i];
+      if (p) {
+        texte(bx + 3.3, by + 1.5, 9.5, false, tronque('Identité : ' + p.identite, 9.5, false, 272));
+        texte(bx + 3.3, by + 14, 9.5, false, tronque('Employeur : ' + p.employeur, 9.5, false, 272));
+      }
+    }
+  }
+  if (d.inscrits.length > MAX_INSCRITS) texte(21.3, 800, 10, false, `+ ${d.inscrits.length - MAX_INSCRITS} autre(s) stagiaire(s) non listé(s) — voir la liste de la session`, '#C00000');
 
   // ================= VERSO (page 2) =================
   doc.addPage([FS_PAGE_L, FS_PAGE_H], 'landscape');

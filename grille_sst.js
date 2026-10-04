@@ -180,7 +180,16 @@ function toggleGrilleSst(participantId) {
     </div>`;
   zone.style.display = 'block';
   zone.dataset.type = type;
-  $$('.gs-ind', zone).forEach(s => s.onchange = () => gsRafraichir(participantId));
+  // Groupes « l'un des indicateurs acquis » : un seul indicateur peut être Acquis, les autres passent à Non acquis.
+  const groupesUniques = [];
+  Object.values(grille.comps).forEach(c => c.groupes.forEach(g => { if (g.regle === 'any') groupesUniques.push(g.ind.map(i => i.id)); }));
+  $$('.gs-ind', zone).forEach(sel => sel.onchange = () => {
+    if (sel.value === 'oui') {
+      const groupe = groupesUniques.find(ids => ids.includes(sel.dataset.id));
+      if (groupe) $$('.gs-ind', zone).forEach(o => { if (o !== sel && groupe.includes(o.dataset.id)) o.value = 'non'; });
+    }
+    gsRafraichir(participantId);
+  });
   gsRafraichir(participantId);
 }
 

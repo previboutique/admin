@@ -16,7 +16,7 @@ window.CATEGORIES_MENU = {
   ],
   admin: [
     { id: 'accueil', libelle: 'Accueil', icone: '🏠', onglets: [['accueil', 'Accueil']] },
-    { id: 'activite', libelle: 'Activité formation', icone: '📚', onglets: [['activite-dashboard', 'Tableau de bord'], ['activite-synthese', 'Synthèse de session'], ['catalogue', 'Catalogue'], ['positionnement', 'Positionnement'], ['familles', 'Familles & codes'], ['sessions', 'Sessions'], ['bpf', 'BPF']] },
+    { id: 'activite', libelle: 'Activité formation', icone: '📚', onglets: [['activite-dashboard', 'Tableau de bord'], ['sessions', 'Sessions'], ['activite-synthese', 'Synthèse de session'], ['catalogue', 'Catalogue'], ['positionnement', 'Positionnement'], ['familles', 'Familles & codes'], ['bpf', 'BPF']] },
     { id: 'contacts', libelle: 'Contacts', icone: '👥', onglets: [['clients', 'Clients'], ['stagiaires', 'Stagiaires']] },
     { id: 'intervenants', libelle: 'Intervenants', icone: '🎓', onglets: [['intervenants-dashboard', 'Tableau de bord'], ['formateurs', 'Formateurs'], ['soustraitants', 'Organismes sous-traitants']] },
     { id: 'administration', libelle: 'Administration', icone: '⚙️', onglets: [['organisation', 'Organisme'], ['import', 'Import']] },

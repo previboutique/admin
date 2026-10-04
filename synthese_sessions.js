@@ -40,7 +40,10 @@ async function ecranSyntheseSessions(vue) {
     sessions.push(...(data || []));
     if (!data || data.length < 500) break;
   }
-  const { data: formations, error: errF } = await supa.from('formations_catalogue').select('id, denomination, categorie, formation_recyclage_id');
+  // type_formation / formation_initiale_id viennent du patch 2026-10-04e : si ce
+  // patch n'est pas encore passé, on retombe sur le seul lien formation_recyclage_id.
+  let { data: formations, error: errF } = await supa.from('formations_catalogue').select('id, denomination, categorie, formation_recyclage_id, type_formation, formation_initiale_id');
+  if (errF) ({ data: formations, error: errF } = await supa.from('formations_catalogue').select('id, denomination, categorie, formation_recyclage_id'));
   if (errF) { DEBUG.erreur('ecranSyntheseSessions formations', errF); $('#ss-contenu').innerHTML = '<div class="carte">Erreur de chargement.</div>'; return; }
 
   window.__ssSessions = sessions.filter(s => s.date_debut);
@@ -188,10 +191,16 @@ function rafraichirSyntheseSessions() {
   const formations = window.__ssFormations || [];
   const parId = Object.fromEntries(formations.map(f => [f.id, f]));
 
-  // Fiche recyclage -> fiche initiale qui la désigne.
+  // Fiche recyclage -> fiche initiale. On part du lien « formation à programmer
+  // au recyclage » posé sur la fiche initiale (anciens réglages), puis la
+  // définition explicite du catalogue (type « recyclage » + formation initiale)
+  // a le dernier mot.
   const initialDe = {};
   formations.forEach(f => {
     if (f.formation_recyclage_id && f.formation_recyclage_id !== f.id && !initialDe[f.formation_recyclage_id]) initialDe[f.formation_recyclage_id] = f.id;
+  });
+  formations.forEach(f => {
+    if (f.type_formation === 'recyclage' && f.formation_initiale_id) initialDe[f.id] = f.formation_initiale_id;
   });
   const estRecyclage = id => !!initialDe[id];
   const familleDe = id => initialDe[id] || id;

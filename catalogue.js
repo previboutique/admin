@@ -49,7 +49,11 @@ async function chargerCatalogue() {
       <tbody>${formations.map(f => `
         <tr style="border-top:1px solid #eee;${f.actif ? '' : 'opacity:.5;'}">
           <td style="padding:6px 8px;width:90px;color:#55636c;">${esc(f.code)}</td>
-          <td style="padding:6px 8px;">${esc(f.denomination)}</td>
+          <td style="padding:6px 8px;">${esc(f.denomination)}
+            ${f.type_formation === 'recyclage'
+              ? `<span style="font-size:11px;background:#e3f6ee;color:#1a7f3c;border-radius:10px;padding:1px 8px;margin-left:6px;">Recyclage${f.formation_initiale_id ? ' de ' + esc((data.find(x => x.id === f.formation_initiale_id) || {}).denomination || '?') : ' — initiale à définir'}</span>`
+              : '<span style="font-size:11px;background:#e8f0fb;color:#2a78d6;border-radius:10px;padding:1px 8px;margin-left:6px;">Initiale</span>'}
+          </td>
           <td style="padding:6px 8px;width:120px;">${(f.prix_individuel != null || f.prix_groupe != null)
             ? `Ind. ${f.prix_individuel != null ? f.prix_individuel + ' €' : '—'} / Grp ${f.prix_groupe != null ? f.prix_groupe + ' €' : '—'}`
             : (f.prix != null ? f.prix + ' €' : '—')}</td>
@@ -140,6 +144,26 @@ function ouvrirFormFormation(id) {
         </div>
       </div>
 
+      <div style="margin-top:12px;padding:10px 12px;background:#f6f8fa;border-radius:8px;">
+        <strong style="font-size:13px;">Type de formation</strong>
+        <div style="display:flex;gap:20px;margin-top:6px;">
+          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin:0;color:inherit;">
+            <input type="radio" name="cf-type" id="cf-type-initiale" value="initiale" style="width:auto;" ${!f || f.type_formation !== 'recyclage' ? 'checked' : ''}> Formation initiale
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-weight:normal;margin:0;color:inherit;">
+            <input type="radio" name="cf-type" id="cf-type-recyclage" value="recyclage" style="width:auto;" ${f && f.type_formation === 'recyclage' ? 'checked' : ''}> Recyclage
+          </label>
+        </div>
+        <div id="cf-initiale-bloc" style="display:${f && f.type_formation === 'recyclage' ? 'block' : 'none'};">
+          <label for="cf-initiale">Recyclage de la formation initiale</label>
+          <select id="cf-initiale">
+            <option value="">— choisir la formation initiale —</option>
+            ${autres.filter(a => a.type_formation !== 'recyclage').map(a => `<option value="${a.id}" ${f && f.formation_initiale_id === a.id ? 'selected' : ''}>${esc(a.denomination)} (${esc(a.code)})</option>`).join('')}
+          </select>
+        </div>
+        <p style="font-size:12px;color:#55636c;margin:6px 0 0;">Sert à la Synthèse de session (résultats initiaux / recyclage) et regroupe un recyclage avec sa formation initiale.</p>
+      </div>
+
       <label for="cf-recyclage">Formation à programmer au recyclage</label>
       <select id="cf-recyclage">
         <option value="">— elle-même / non défini —</option>
@@ -199,6 +223,10 @@ function ouvrirFormFormation(id) {
 
   zone.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
+  document.querySelectorAll('input[name="cf-type"]').forEach(r => {
+    r.onchange = () => { $('#cf-initiale-bloc').style.display = $('#cf-type-recyclage').checked ? 'block' : 'none'; };
+  });
+
   $('#cf-valider').onclick = async () => {
     const payload = {
       organisation_id: S.organisation.id,
@@ -211,6 +239,8 @@ function ouvrirFormFormation(id) {
       duree_heures: $('#cf-duree').value ? Number($('#cf-duree').value) : null,
       cycle_mois: $('#cf-cycle').value ? Number($('#cf-cycle').value) : null,
       formation_recyclage_id: $('#cf-recyclage').value || null,
+      type_formation: $('#cf-type-recyclage').checked ? 'recyclage' : 'initiale',
+      formation_initiale_id: $('#cf-type-recyclage').checked ? ($('#cf-initiale').value || null) : null,
       objectifs: $('#cf-objectifs').value.trim() || null,
       programme_methode: $('#cf-programme').value.trim() || null,
       evaluation: $('#cf-evaluation').value.trim() || null,
@@ -228,17 +258,31 @@ function ouvrirFormFormation(id) {
       return;
     }
 
-    const req = f
-      ? supa.from('formations_catalogue').update(payload).eq('id', f.id)
-      : supa.from('formations_catalogue').insert(payload);
+    if (payload.type_formation === 'recyclage' && !payload.formation_initiale_id) {
+      $('#cf-erreur').textContent = 'Pour un recyclage, choisis sa formation initiale.';
+      return;
+    }
 
-    const { error } = await req;
+    const req = f
+      ? supa.from('formations_catalogue').update(payload).eq('id', f.id).select('id').single()
+      : supa.from('formations_catalogue').insert(payload).select('id').single();
+
+    const { data: enregistree, error } = await req;
     if (error) {
       DEBUG.erreur('enregistrerFormation', error);
       $('#cf-erreur').textContent = error.code === '23505'
         ? 'Ce code existe déjà dans le catalogue.'
         : 'Erreur : ' + error.message;
       return;
+    }
+    // Un recyclage devient aussi "la formation à programmer au recyclage" de sa
+    // formation initiale, si celle-ci n'en a pas encore (alimente la liste des
+    // recyclages à programmer).
+    if (payload.type_formation === 'recyclage' && payload.formation_initiale_id && enregistree?.id) {
+      const initiale = window.__catalogueCourant.find(x => x.id === payload.formation_initiale_id);
+      if (initiale && (!initiale.formation_recyclage_id || initiale.formation_recyclage_id === initiale.id)) {
+        await supa.from('formations_catalogue').update({ formation_recyclage_id: enregistree.id }).eq('id', initiale.id);
+      }
     }
     toast('Formation enregistrée.');
     $('#catalogue-form').innerHTML = '';

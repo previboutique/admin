@@ -740,7 +740,7 @@ async function ouvrirSession(id) {
           — statut : ${esc(session.statut)}
         </p>
         <div id="sess-horaires" style="margin-top:8px;font-size:13px;color:#55636c;">${htmlHorairesSession(session, false)}</div>
-        ${PEUT_GERER_SESSIONS() && /secour/i.test(session.formations_catalogue?.categorie || '') ? `
+        ${PEUT_GERER_SESSIONS() && (session.formations_catalogue?.declaration_forprev ?? /secour/i.test(session.formations_catalogue?.categorie || '')) ? `
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:8px;font-size:13px;color:#55636c;">
           <span>ForePrev — n° de session :</span>
           <input id="sess-forprev" value="${esc(session.numero_forprev || '')}" placeholder="n° ForePrev" style="width:170px;margin:0;padding:4px 8px;">

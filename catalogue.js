@@ -175,6 +175,11 @@ function ouvrirFormFormation(id) {
         ${autres.map(a => `<option value="${a.id}" ${f && f.formation_recyclage_id === a.id ? 'selected' : ''}>${esc(a.denomination)} (${esc(a.code)})</option>`).join('')}
       </select>
 
+      <label style="display:flex;align-items:center;gap:8px;font-weight:normal;margin-top:12px;">
+        <input type="checkbox" id="cf-forprev" style="width:auto;" ${f && f.declaration_forprev ? 'checked' : ''}> Déclaration ForePrev (SST, MAC SST…)
+      </label>
+      <p style="font-size:12px;color:#55636c;margin:2px 0 0;">Si coché, les champs « n° de session ForePrev » et « date de déclaration » apparaissent dans les sessions de cette formation.</p>
+
       <label for="cf-theme-pos">Thème du questionnaire de positionnement (QR code de la convocation)</label>
       <input id="cf-theme-pos" list="cf-themes-pos" value="${f ? esc(f.theme_positionnement || '') : ''}" placeholder="— aucun questionnaire —">
       <datalist id="cf-themes-pos">${(window.__themesPositionnement || []).map(t => `<option value="${esc(t)}">`).join('')}</datalist>
@@ -273,6 +278,7 @@ function ouvrirFormFormation(id) {
 
     if ($('#cf-famille')) payload.famille_id = $('#cf-famille').value || null;
     // n'écrit le thème que si la colonne existe (patch SQL exécuté), pour ne jamais bloquer l'enregistrement d'une fiche
+    if ((window.__catalogueCourant || []).length && 'declaration_forprev' in window.__catalogueCourant[0]) payload.declaration_forprev = $('#cf-forprev').checked;
     if ((window.__catalogueCourant || []).length && 'theme_positionnement' in window.__catalogueCourant[0]) payload.theme_positionnement = $('#cf-theme-pos').value.trim() || null;
 
     if (!payload.code || !payload.categorie || !payload.denomination) {

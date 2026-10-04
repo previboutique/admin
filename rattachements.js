@@ -199,12 +199,16 @@ async function ouvrirRattachements() {
     </div>
 
     ${ri.groupes.length ? `<div class="carte"><h3 style="margin-top:0;">0. Inscriptions à rattacher d'après la fiche du stagiaire (${ri.groupes.reduce((n, g) => n + g.items.length, 0)})</h3>
-      <p style="font-size:12px;color:#55636c;margin:0 0 8px;">Ces stagiaires ont bien une entreprise, mais leur inscription à la session ne l'a pas retenue. L'entreprise est reportée sur l'inscription ; si la session ne la connaît pas encore, elle y est ajoutée (sans tarif : à compléter dans la session).</p>
+      <p style="font-size:12px;color:#55636c;margin:0 0 8px;">Ces stagiaires ont bien une entreprise, mais leur inscription à la session ne l'a pas retenue. L'entreprise reportée est celle inscrite sur la fiche de chaque stagiaire (« Voir les stagiaires » pour contrôler nom par nom). Elle est reportée sur l'inscription ; si la session ne la connaît pas encore, elle y est ajoutée (sans tarif : à compléter dans la session).</p>
       <table style="width:100%;border-collapse:collapse;font-size:13px;"><tbody>${ri.groupes.map((g, i) => `
         <tr style="border-top:1px solid #eee;"><td style="padding:5px 8px;"><input type="checkbox" class="rt-insc" data-i="${i}" checked style="width:auto;"></td>
           <td style="padding:5px 8px;">${rtSessionLibelle(g.session)}</td>
           <td style="padding:5px 8px;">${[...g.parClient].map(([c, n]) => `<strong>${esc(ri.cliNom.get(c) || '?')}</strong> (${n})`).join(', ')}
-            ${g.nouveauxClients.size ? `<div style="font-size:12px;color:#8a5a00;">+ ajouté(e) à la session : ${[...g.nouveauxClients].map(c => esc(ri.cliNom.get(c) || '?')).join(', ')}</div>` : ''}</td></tr>`).join('')}
+            <details style="font-size:12px;color:#55636c;margin-top:3px;"><summary style="cursor:pointer;">Voir les ${g.items.length} stagiaire(s)</summary>${g.items.map(({ p, client }) => `${esc((p.stagiaires?.prenom || '') + ' ' + (p.stagiaires?.nom || ''))} → <strong>${esc(ri.cliNom.get(client) || '?')}</strong>${p.stagiaires?.client_id ? ' (fiche stagiaire)' : ' (client unique de la session)'}`).join('<br>')}</details>
+            ${g.nouveauxClients.size ? `<div style="font-size:12px;color:#8a5a00;">+ ajouté(e) à la session : ${[...g.nouveauxClients].map(c => esc(ri.cliNom.get(c) || '?')).join(', ')}</div>` : ''}</td>
+          <td style="padding:5px 8px;white-space:nowrap;text-align:right;">
+            ${g.parClient.size === 1 ? `<select class="rt-insc-cli" data-i="${i}" style="max-width:190px;font-size:12px;" title="Changer l'entreprise de toute la session">${rtOptionsClients(donnees.clients, [...g.parClient.keys()][0])}</select>` : ''}
+            <button class="bouton" style="font-size:12px;padding:4px 10px;" onclick="rtAppliquerLigneInscription(${i})">Appliquer cette ligne</button></td></tr>`).join('')}
       </tbody></table>
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
         <button class="bouton" style="background:#eee;color:#333;font-size:13px;" onclick="document.querySelectorAll('.rt-insc').forEach(c=>c.checked=true)">Tout cocher</button>
@@ -274,6 +278,23 @@ async function rtAppliquer(actions, intitule) {
   toast(`Appliqué : ${data.stagiaires} stagiaire(s), ${data.inscriptions} inscription(s), ${data.sessions} session(s)` + (data.ignores ? ` (${data.ignores} ignoré(s))` : ''));
   await ouvrirRattachements();
   if (typeof ecranStagiaires === 'function' && $('#stagiaires-liste')) { /* la liste se rafraîchit à la prochaine ouverture */ }
+}
+
+// Applique une seule session de la section 0, avec éventuellement une autre entreprise choisie dans la liste.
+function rtAppliquerLigneInscription(i) {
+  const g = window.__rt.ri.groupes[i];
+  const sel = document.querySelector(`.rt-insc-cli[data-i="${i}"]`);
+  let actions = g.actions;
+  const propose = g.parClient.size === 1 ? [...g.parClient.keys()][0] : null;
+  if (sel && sel.value && sel.value !== propose) {
+    const c = sel.value;
+    actions = [{ type: 'session_client', session_id: g.session.id, client_id: c }];
+    g.items.forEach(({ p }) => {
+      actions.push({ type: 'participant', participant_id: p.id, client_id: c });
+      if (!p.stagiaires?.client_id) actions.push({ type: 'stagiaire', stagiaire_id: p.stagiaire_id, client_id: c });
+    });
+  }
+  rtAppliquer(actions, 'Session ' + (g.session.numero_session || '') + ' : ' + g.items.length + ' inscription(s)');
 }
 
 function rtAppliquerInscriptions() {

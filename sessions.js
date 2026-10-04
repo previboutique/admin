@@ -794,6 +794,11 @@ async function ouvrirSession(id) {
         <input type="checkbox" id="sess-sous-traitance" style="width:auto;" ${session.sous_traitance_recue ? 'checked' : ''}>
         Session confiée par un autre organisme de formation (sous-traitance reçue)
       </label>
+      ${/secour/i.test(session.formations_catalogue?.categorie || '') ? `
+      <label for="sess-forprev">N° de session ForePrev (SST)</label>
+      <input id="sess-forprev" value="${esc(session.numero_forprev || '')}" style="max-width:420px;" placeholder="ex. numéro fourni par ForePrev">
+      <label for="sess-forprev-date">Date de déclaration ForePrev</label>
+      <input type="date" id="sess-forprev-date" value="${esc(session.date_declaration_forprev || '')}" style="max-width:220px;">` : ''}
       <button class="bouton" style="padding:6px 14px;font-size:13px;margin-top:10px;" onclick="enregistrerFinancementSession('${session.id}')">Enregistrer</button>
       <p style="font-size:12px;color:#55636c;margin:8px 0 0;">Sert au calcul automatique du Bilan Pédagogique et Financier (BPF) annuel.</p>
     </div>` : ''}
@@ -804,6 +809,7 @@ async function ouvrirSession(id) {
         sessionClients.map(sc => `<button class="bouton" style="margin:0 8px 8px 0;" onclick="genererConventionPourClient('${sc.client_id}')">Convention — ${esc(sc.clients?.raison_sociale || '')}</button>`).join('')
         : `<button class="bouton" style="margin:0 8px 8px 0;" onclick="genererConvention(window.__sessionCourante, window.__participantsCourants)">Convention</button>`}
       <button class="bouton" style="margin:0 0 8px;" onclick="genererFeuillePresence(window.__sessionCourante, window.__participantsCourants)">Feuille d'émargement</button>
+      ${PEUT_GERER_SESSIONS() ? `<button class="bouton" style="margin:0 0 8px 8px;" onclick="genererFicheSynthese(window.__sessionCourante, window.__participantsCourants)">Feuille de synthèse (A3, usage interne)</button>` : ''}
       <p style="font-size:12px;color:#55636c;margin:8px 0 0;">Chaque client a sa propre Convention (tarif et liste de stagiaires qui lui sont rattachés). La feuille d'émargement n'a pas de modèle papier de référence confirmé — mise en page à ajuster si besoin.</p>
     </div>
 
@@ -945,7 +951,9 @@ async function enregistrerFinancementSession(sessionId) {
   const sousTraitance = $('#sess-sous-traitance').checked;
   const modalite = $('#sess-modalite').value;
   const formateurId = $('#sess-formateur')?.value || null;
-  const { error } = await supa.from('sessions_formation').update({ origine_financement: origine, sous_traitance_recue: sousTraitance, modalite, formateur_id: formateurId }).eq('id', sessionId);
+  const charge = { origine_financement: origine, sous_traitance_recue: sousTraitance, modalite, formateur_id: formateurId };
+  if ($('#sess-forprev')) { charge.numero_forprev = $('#sess-forprev').value.trim() || null; charge.date_declaration_forprev = $('#sess-forprev-date').value || null; }
+  const { error } = await supa.from('sessions_formation').update(charge).eq('id', sessionId);
   if (error) { DEBUG.erreur('enregistrerFinancementSession', error); toast('Erreur : ' + error.message, 'erreur'); return; }
   toast('Financement mis à jour.');
   if (window.__sessionCourante) {
@@ -953,6 +961,7 @@ async function enregistrerFinancementSession(sessionId) {
     window.__sessionCourante.sous_traitance_recue = sousTraitance;
     window.__sessionCourante.modalite = modalite;
     window.__sessionCourante.formateur_id = formateurId;
+    if ('numero_forprev' in charge) { window.__sessionCourante.numero_forprev = charge.numero_forprev; window.__sessionCourante.date_declaration_forprev = charge.date_declaration_forprev; }
   }
 }
 

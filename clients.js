@@ -260,6 +260,11 @@ async function ouvrirFicheClient(id) {
 
     ${client ? `
     <div class="carte" style="max-width:640px;">
+      <h3 style="margin-top:0;">Sessions de formation</h3>
+      <div id="sessions-client-zone">Chargement…</div>
+    </div>
+
+    <div class="carte" style="max-width:640px;">
       <h3 style="margin-top:0;">Contacts</h3>
       <div id="contacts-liste">${rendreContacts(contacts)}</div>
       <button class="bouton" style="margin-top:10px;padding:6px 12px;font-size:13px;" onclick="ouvrirFormContact('${client.id}', null)">+ Ajouter un contact</button>
@@ -279,6 +284,7 @@ async function ouvrirFicheClient(id) {
       <div id="stat-form"></div>
     </div>` : ''}`;
 
+  if (client) chargerSessionsClient(client.id);
   if (client && PEUT_GERER_SESSIONS() && typeof rendreAccesClient === 'function') rendreAccesClient(client, contacts);
 
   const majZoneOpco = () => {
@@ -456,4 +462,65 @@ async function ouvrirFormStat(clientId, statId) {
     $('#stat-form').innerHTML = '';
     ouvrirFicheClient(clientId);
   };
+}
+
+
+// ---------------------------------------------------------------------------
+// Sessions de formation d'un client (réalisées, à venir, annulées)
+// Une session est rattachée au client par la session elle-même (session_clients, client principal)
+// OU par l'inscription d'au moins un stagiaire : on regroupe les trois sources, pour que l'historique
+// importé apparaisse même quand la session n'a pas été reliée au client.
+// ---------------------------------------------------------------------------
+async function chargerSessionsClient(clientId) {
+  const zone = $('#sessions-client-zone');
+  if (!zone) return;
+  try {
+    const [r1, r2, r3] = await Promise.all([
+      supa.from('session_clients').select('session_id').eq('client_id', clientId).limit(5000),
+      supa.from('session_participants').select('session_id').eq('client_id', clientId).limit(5000),
+      supa.from('sessions_formation').select('id').eq('client_id', clientId).limit(5000),
+    ]);
+    const err = r1.error || r2.error || r3.error;
+    if (err) throw err;
+    const nbStagiaires = new Map();
+    (r2.data || []).forEach(p => nbStagiaires.set(p.session_id, (nbStagiaires.get(p.session_id) || 0) + 1));
+    const ids = [...new Set([...(r1.data || []).map(x => x.session_id), ...nbStagiaires.keys(), ...(r3.data || []).map(x => x.id)])];
+    let sessions = [];
+    for (let i = 0; i < ids.length; i += 80) {
+      const { data, error } = await supa.from('sessions_formation')
+        .select('id, numero_session, date_debut, date_fin, statut, lieu, formations_catalogue(denomination)').in('id', ids.slice(i, i + 80));
+      if (error) throw error;
+      sessions.push(...(data || []));
+    }
+    sessions.sort((a, b) => String(b.date_debut || '').localeCompare(String(a.date_debut || '')));
+    window.__sessionsClient = { sessions, nbStagiaires };
+    zone.innerHTML = sessions.length
+      ? `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+          <select id="sc-filtre" style="width:auto;" onchange="rendreSessionsClient()">
+            <option value="terminee">Réalisées</option><option value="">Toutes</option><option value="avenir">À venir</option><option value="annulee">Annulées</option>
+          </select><span id="sc-resume" style="font-size:13px;color:#55636c;"></span></div>
+        <div id="sc-liste"></div>`
+      : '<p style="color:#55636c;margin:0;">Aucune session pour ce client.</p>';
+    if (sessions.length) rendreSessionsClient();
+  } catch (e) {
+    DEBUG.erreur('chargerSessionsClient', e);
+    zone.innerHTML = '<p class="erreur">Erreur de chargement des sessions : ' + esc(e.message || e) + '</p>';
+  }
+}
+
+function rendreSessionsClient() {
+  const { sessions, nbStagiaires } = window.__sessionsClient || { sessions: [], nbStagiaires: new Map() };
+  const filtre = $('#sc-filtre').value;
+  const liste = sessions.filter(s => !filtre ? true : (filtre === 'avenir' ? ['planifiee', 'en_cours'].includes(s.statut) : s.statut === filtre));
+  const total = liste.reduce((n, s) => n + (nbStagiaires.get(s.id) || 0), 0);
+  $('#sc-resume').textContent = `${liste.length} session(s) · ${total} stagiaire(s)`;
+  const libelle = { terminee: 'Réalisée', planifiee: 'Planifiée', en_cours: 'En cours', annulee: 'Annulée' };
+  $('#sc-liste').innerHTML = liste.length
+    ? `<table style="width:100%;border-collapse:collapse;font-size:13px;"><tbody>${liste.map(s => `
+        <tr style="border-top:1px solid #eee;cursor:pointer;" onclick="ouvrirSession('${s.id}')">
+          <td style="padding:5px 8px;white-space:nowrap;">${s.date_debut ? esc(formatDateFr(s.date_debut)) : '—'}</td>
+          <td style="padding:5px 8px;">${esc(s.formations_catalogue?.denomination || '')}<br><span style="font-size:12px;color:#55636c;">n° ${esc(s.numero_session || '—')}</span></td>
+          <td style="padding:5px 8px;text-align:right;white-space:nowrap;">${nbStagiaires.get(s.id) ? nbStagiaires.get(s.id) + ' stagiaire(s)' : ''}</td>
+          <td style="padding:5px 8px;font-size:12px;color:#55636c;">${esc(libelle[s.statut] || s.statut || '')}</td></tr>`).join('')}</tbody></table>`
+    : '<p style="color:#55636c;margin:0;">Aucune session dans ce filtre.</p>';
 }

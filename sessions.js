@@ -815,10 +815,12 @@ async function ouvrirSession(id) {
         : `<button class="bouton" style="margin:0 8px 8px 0;" onclick="genererConvention(window.__sessionCourante, window.__participantsCourants)">Convention</button>`}
       <button class="bouton" style="margin:0 0 8px;" onclick="genererFeuillePresence(window.__sessionCourante, window.__participantsCourants)">Feuille d'émargement</button>
       ${PEUT_GERER_SESSIONS() ? `<button class="bouton" style="margin:0 0 8px 8px;" onclick="genererFicheSynthese(window.__sessionCourante, window.__participantsCourants)">Feuille de synthèse (A3, usage interne)</button>` : ''}
+      ${PEUT_GERER_SESSIONS() ? `<button class="bouton" style="margin:0 0 8px 8px;" onclick="ouvrirExportPasseport('${session.id}')">Export Passeport de prévention</button>` : ''}
       ${grilleSstType(session) ? `<button class="bouton" style="margin:0 0 8px 8px;" onclick="genererGrillesSstSession(window.__sessionCourante, window.__participantsCourants)">Grilles de certification ${grilleSstType(session) === 'mac' ? 'MAC SST' : 'SST'} (un PDF par stagiaire)</button>` : ''}
       <p style="font-size:12px;color:#55636c;margin:8px 0 0;">Chaque client a sa propre Convention (tarif et liste de stagiaires qui lui sont rattachés). La feuille d'émargement n'a pas de modèle papier de référence confirmé — mise en page à ajuster si besoin.</p>
     </div>
 
+    ${PEUT_GERER_SESSIONS() ? '<div class="carte" id="passeport-session" data-ouvert="0" style="display:none;"></div>' : ''}
     ${PEUT_GERER_SESSIONS() ? '<div class="carte" id="espace-client-session"></div>' : ''}
 
     <div class="carte">

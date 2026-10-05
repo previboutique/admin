@@ -16,14 +16,14 @@ window.CATEGORIES_MENU = {
   ],
   admin: [
     { id: 'accueil', libelle: 'Accueil', icone: '🏠', onglets: [['accueil', 'Accueil']] },
-    { id: 'activite', libelle: 'Activité formation', icone: '📚', onglets: [['activite-dashboard', 'Tableau de bord'], ['sessions', 'Sessions'], ['activite-synthese', 'Synthèse de session'], ['catalogue', 'Catalogue'], ['positionnement', 'Positionnement'], ['familles', 'Familles & codes'], ['bpf', 'BPF']] },
+    { id: 'activite', libelle: 'Activité formation', icone: '📚', onglets: [['activite-dashboard', 'Tableau de bord'], ['sessions', 'Sessions'], ['activite-synthese', 'Synthèse de session'], ['catalogue', 'Catalogue'], ['positionnement', 'Positionnement'], ['familles', 'Familles & codes'], ['passeport', 'Export Passeport'], ['bpf', 'BPF']] },
     { id: 'contacts', libelle: 'Contacts', icone: '👥', onglets: [['clients', 'Clients'], ['stagiaires', 'Stagiaires']] },
     { id: 'intervenants', libelle: 'Intervenants', icone: '🎓', onglets: [['intervenants-dashboard', 'Tableau de bord'], ['formateurs', 'Formateurs'], ['soustraitants', 'Organismes sous-traitants']] },
     { id: 'administration', libelle: 'Administration', icone: '⚙️', onglets: [['organisation', 'Organisme'], ['import', 'Import']] },
   ],
   gestionnaire: [
     { id: 'accueil', libelle: 'Accueil', icone: '🏠', onglets: [['accueil', 'Accueil']] },
-    { id: 'activite', libelle: 'Activité formation', icone: '📚', onglets: [['sessions', 'Sessions']] },
+    { id: 'activite', libelle: 'Activité formation', icone: '📚', onglets: [['sessions', 'Sessions'], ['passeport', 'Export Passeport']] },
     { id: 'contacts', libelle: 'Contacts', icone: '👥', onglets: [['clients', 'Clients'], ['stagiaires', 'Stagiaires']] },
   ],
   // Un formateur n'a accès qu'à ses propres sessions (agenda, FISE,
@@ -41,6 +41,7 @@ window.DISPATCH_ONGLETS = {
   catalogue: ecranCatalogue,    // catalogue.js
   positionnement: ecranPositionnement, // positionnement.js (questions de positionnement)
   familles: ecranFamilles,      // familles.js (codes Passeport de prévention)
+  passeport: ecranPasseport,    // passeport.js (export CSV Passeport de prévention + historique)
   import: ecranImport,          // import_excel.js
   clients: ecranClients,        // clients.js
   soustraitants: ecranSousTraitants, // clients.js (clients de type organisme_formation)

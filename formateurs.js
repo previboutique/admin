@@ -79,6 +79,12 @@ async function ouvrirFicheFormateur(id) {
         </div>
         <div style="flex:1;"><label for="fo-taux">Taux horaire (€/h)</label><input id="fo-taux" type="number" step="0.01" value="${formateur?.taux_horaire ?? ''}"></div>
       </div>
+      ${formateur && 'qualification_passeport' in formateur ? `
+      <label for="fo-qualif">Qualification déclarée au Passeport de prévention</label>
+      <select id="fo-qualif">
+        <option value="">— non renseignée —</option>
+        ${Object.entries(PP_QUALIFICATIONS).map(([k, v]) => `<option value="${k}" ${formateur.qualification_passeport === k ? 'selected' : ''}>${esc(v)}</option>`).join('')}
+      </select>` : ''}
       <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
         <input type="checkbox" id="fo-externe" style="width:auto;" ${formateur?.formateur_externe ? 'checked' : ''}>
         <span>Formateur externe (sous-traitant, hors effectif de l'organisme — cadre E du BPF)</span>
@@ -108,6 +114,7 @@ async function ouvrirFicheFormateur(id) {
       taux_horaire: $('#fo-taux').value ? Number($('#fo-taux').value) : null,
       formateur_externe: $('#fo-externe').checked,
     };
+    if ($('#fo-qualif')) payload.qualification_passeport = $('#fo-qualif').value || null;
     if (!payload.nom || !payload.prenom) { $('#fo-erreur').textContent = 'Nom et prénom obligatoires.'; return; }
 
     const bouton = $('#fo-valider');

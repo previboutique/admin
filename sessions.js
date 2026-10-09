@@ -123,14 +123,18 @@ async function ecranSessions(vue) {
     <div id="doublons-sessions-zone"></div>
     <div class="carte"><div id="liste-sessions">Chargement…</div></div>`;
 
-  const [{ data, error }, { data: formateurs }] = await Promise.all([
-    supa.from('sessions_formation')
-      .select('id, numero_session, date_debut, date_fin, lieu, statut, formateur_id, formation_id, created_at, formations_catalogue(denomination), session_clients(clients(raison_sociale)), session_participants(count)')
+  const requeteSessions = (colOperation) => supa.from('sessions_formation')
+      .select(`id, numero_session, date_debut, date_fin, lieu, statut, formateur_id, formation_id, ${colOperation}created_at, formations_catalogue(denomination), session_clients(clients(raison_sociale)), session_participants(count)`)
       .order('date_debut', { ascending: false })
-      .limit(300),
+      .limit(300);
+  const [reponseSessions, { data: formateurs }] = await Promise.all([
+    requeteSessions('operation_id, '),
     supa.from('profils').select('id, nom, prenom, formateur_externe').eq('actif', true).order('nom'),
   ]);
 
+  let { data, error } = reponseSessions;
+  // Patch « opérations » pas encore passé dans Supabase : on recharge sans la colonne plutôt que de bloquer la liste.
+  if (error && /operation_id/.test(error.message || '')) ({ data, error } = await requeteSessions(''));
   const zone = $('#liste-sessions');
   if (error) { DEBUG.erreur('ecranSessions', error); zone.textContent = 'Erreur de chargement.'; return; }
   (data || []).forEach(s => {
@@ -353,6 +357,7 @@ function detecterDoublonsSessions(liste) {
   const groupes = {};
   liste.forEach(s => {
     if (!s.formation_id || !s.date_debut) return;
+    if (s.operation_id) return;   // les créneaux d'une opération se ressemblent par construction : jamais des doublons
     const cle = sesCleDoublon(s);
     (groupes[cle] = groupes[cle] || []).push(s);
   });
@@ -810,7 +815,9 @@ async function ouvrirSession(id) {
 
     <div class="carte">
       <h3 style="margin-top:0;">Documents de la session</h3>
-      ${(sessionClients && sessionClients.length) ?
+      ${session.operation_id ? `<p style="margin:0 0 8px;font-size:13px;">Cette session est un <b>créneau d'une opération</b> : la convention est commune à toute l'opération.</p>
+        <button class="bouton" style="margin:0 8px 8px 0;" onclick="ouvrirOperation('${session.operation_id}')">Ouvrir l'opération (convention, planning)</button>` :
+      (sessionClients && sessionClients.length) ?
         sessionClients.map(sc => `<button class="bouton" style="margin:0 8px 8px 0;" onclick="genererConventionPourClient('${sc.client_id}')">Convention — ${esc(sc.clients?.raison_sociale || '')}</button>`).join('')
         : `<button class="bouton" style="margin:0 8px 8px 0;" onclick="genererConvention(window.__sessionCourante, window.__participantsCourants)">Convention</button>`}
       <button class="bouton" style="margin:0 0 8px;" onclick="genererFeuillePresence(window.__sessionCourante, window.__participantsCourants)">Feuille d'émargement</button>

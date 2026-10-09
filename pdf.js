@@ -187,8 +187,11 @@ function genererConvocation(session, participant, sansTelechargement) {
   const h = { debut: fh(h0.debut), pause_debut: fh(h0.pause_debut), pause_fin: fh(h0.pause_fin), fin: fh(h0.fin) };
   const yH = yDate + 68.8;
   T(53, yH, 12, false, 'Heure de début :');      T(148, yH - 0.9, 14, true, h.debut || 'à préciser');
-  T(53, yH + 26, 12, false, 'Pause déjeuner :');  T(148, yH + 23.1, 14, true, h.pause_debut || '—');
-  T(190, yH + 23.1, 14, true, 'à');                T(217, yH + 23.1, 14, true, h.pause_fin || '—');
+  // Pas de pause renseignée (ex. créneau de 30 min d'une opération) : la ligne est omise plutôt que « — à — ».
+  if (h.pause_debut || h.pause_fin) {
+    T(53, yH + 26, 12, false, 'Pause déjeuner :');  T(148, yH + 23.1, 14, true, h.pause_debut || '—');
+    T(190, yH + 23.1, 14, true, 'à');                T(217, yH + 23.1, 14, true, h.pause_fin || '—');
+  }
   T(53, yH + 50, 12, false, 'Heure de fin :');     T(148, yH + 49.1, 14, true, h.fin || 'à préciser');
   let yC = yH + 75;
   let basConsignes = yC;
@@ -458,11 +461,15 @@ function genererConvention(session, participants, sansTelechargement, clientEntr
   y = paragraphe(doc, "- Type d'action de formation (article L.6313-1 du code du travail) :", y, { apres: 1 });
   y = paragraphe(doc, "formation faisant l'objet d'une attestation dont le titulaire peut se prévaloir.", y, { apres: 4 });
   y = paragraphe(doc, `- Date(s) : ${formatPlageDatesLongue(session.date_debut, session.date_fin)}`, y, { apres: 4 });
-  y = paragraphe(doc, `- Durée : ${f?.duree_heures || ''} heures`, y, { apres: 4 });
+  // Opération découpée en créneaux (operations.js) : une seule convention, durée par stagiaire, planning à part.
+  const op = session.__operation || null;
+  y = paragraphe(doc, `- Durée : ${f?.duree_heures || ''} heures${op ? ' par stagiaire' : ''}`, y, { apres: 4 });
 
   const horaires = (session.horaires && session.horaires[0]) || {};
   const adresse = [session.lieu, session.adresse, [session.code_postal, session.ville].filter(Boolean).join(' ')].filter(Boolean).join(', ');
-  y = paragraphe(doc, `- Horaires : ${horaires.debut || '—'} à ${horaires.pause_debut || '—'} et de ${horaires.pause_fin || '—'} à ${horaires.fin || '—'}     - Lieu : ${adresse}`, y, { apres: 4 });
+  y = paragraphe(doc, op
+    ? `- Horaires : passages par groupes de ${op.stagiaires_par_creneau} stagiaire(s), créneaux de ${op.creneau_duree_min} minutes${op.inter_creneau_min ? ` (${op.inter_creneau_min} minutes entre deux passages)` : ''}, entre ${(horaires.debut || '—').replace(':', 'h')} et ${(horaires.fin || '—').replace(':', 'h')}${(op.pauses || []).length ? `, avec ${(op.pauses || []).map(x => (x.nom || 'pause').toLowerCase() + ' de ' + (x.duree_min >= 60 && x.duree_min % 60 === 0 ? (x.duree_min / 60) + ' h' : x.duree_min + ' min')).join(' et ')} placée(s) selon le déroulement des passages` : ''} (planning des passages communiqué séparément)     - Lieu : ${adresse}`
+    : `- Horaires : ${horaires.debut || '—'} à ${horaires.pause_debut || '—'} et de ${horaires.pause_fin || '—'} à ${horaires.fin || '—'}     - Lieu : ${adresse}`, y, { apres: 4 });
 
   if (f?.conditions_realisation?.length) {
     y = paragraphe(doc, '- Condition de réalisation :', y, { apres: 1 });
@@ -471,7 +478,9 @@ function genererConvention(session, participants, sansTelechargement, clientEntr
 
   y += 4;
   y = paragraphe(doc, 'Article 2 : Effectif formé', y, { gras: true, apres: 2 });
-  y = paragraphe(doc, `L'organisme ${S.organisation.raison_sociale} formera les personnes suivantes : voir liste en annexe`, y, { apres: 6 });
+  y = paragraphe(doc, op
+    ? `L'organisme ${S.organisation.raison_sociale} formera environ ${op.effectif_prevu || '—'} salarié(s) de l'entreprise. La liste nominative et le planning des passages seront communiqués séparément, avant l'action de formation.`
+    : `L'organisme ${S.organisation.raison_sociale} formera les personnes suivantes : voir liste en annexe`, y, { apres: 6 });
 
   y = paragraphe(doc, 'Article 3 : Dispositions financières', y, { gras: true, apres: 2 });
   y = paragraphe(doc, `En contrepartie de cette action de formation, l'employeur s'acquittera des coûts suivants :`, y, { apres: 3 });

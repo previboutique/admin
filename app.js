@@ -16,7 +16,7 @@ window.CATEGORIES_MENU = {
   ],
   admin: [
     { id: 'accueil', libelle: 'Accueil', icone: '🏠', onglets: [['accueil', 'Accueil']] },
-    { id: 'activite', libelle: 'Activité formation', icone: '📚', onglets: [['activite-dashboard', 'Tableau de bord'], ['sessions', 'Sessions'], ['activite-synthese', 'Synthèse de session'], ['catalogue', 'Catalogue'], ['positionnement', 'Positionnement'], ['familles', 'Familles & codes']] },
+    { id: 'activite', libelle: 'Activité formation', icone: '📚', onglets: [['activite-dashboard', 'Tableau de bord'], ['sessions', 'Sessions'], ['operations', 'Opérations'], ['activite-synthese', 'Synthèse de session'], ['catalogue', 'Catalogue'], ['positionnement', 'Positionnement'], ['familles', 'Familles & codes']] },
     { id: 'passeport', libelle: 'Export Passeport', icone: '🛂', onglets: [['passeport', 'Export Passeport']] },
     { id: 'bpf', libelle: 'BPF', icone: '📊', onglets: [['bpf', 'BPF']] },
     { id: 'contacts', libelle: 'Contacts', icone: '👥', onglets: [['clients', 'Clients'], ['stagiaires', 'Stagiaires']] },
@@ -25,7 +25,7 @@ window.CATEGORIES_MENU = {
   ],
   gestionnaire: [
     { id: 'accueil', libelle: 'Accueil', icone: '🏠', onglets: [['accueil', 'Accueil']] },
-    { id: 'activite', libelle: 'Activité formation', icone: '📚', onglets: [['sessions', 'Sessions']] },
+    { id: 'activite', libelle: 'Activité formation', icone: '📚', onglets: [['sessions', 'Sessions'], ['operations', 'Opérations']] },
     { id: 'passeport', libelle: 'Export Passeport', icone: '🛂', onglets: [['passeport', 'Export Passeport']] },
     { id: 'contacts', libelle: 'Contacts', icone: '👥', onglets: [['clients', 'Clients'], ['stagiaires', 'Stagiaires']] },
   ],
@@ -41,6 +41,7 @@ window.CATEGORIES_MENU = {
 window.DISPATCH_ONGLETS = {
   accueil: ecranAccueil,        // dashboard.js
   sessions: ecranSessions,      // sessions.js
+  operations: ecranOperations,  // operations.js (une convention, plusieurs créneaux)
   catalogue: ecranCatalogue,    // catalogue.js
   positionnement: ecranPositionnement, // positionnement.js (questions de positionnement)
   familles: ecranFamilles,      // familles.js (codes Passeport de prévention)
